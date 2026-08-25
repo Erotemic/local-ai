@@ -1,0 +1,20 @@
+# Local configuration / credentials
+.env
+**/.env
+*.env.local
+
+# Local scratch files
+.cache/
+*.log
+*.pid
+*.tmp
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+*~
+
+# Python noise from helper scripts
+__pycache__/
+*.py[cod]

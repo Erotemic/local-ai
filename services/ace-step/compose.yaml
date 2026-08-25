@@ -1,0 +1,95 @@
+services:
+  ace-step-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ACESTEP_REPO: ${ACESTEP_REPO:-https://github.com/ACE-Step/ACE-Step-1.5.git}
+        ACESTEP_REF: ${ACESTEP_REF:-main}
+    image: ${ACESTEP_IMAGE:-local/ace-step:1.5}
+    container_name: ace-step-ui
+    restart: unless-stopped
+    ports:
+      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${ACESTEP_UI_PORT:-7860}:7860"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      ACESTEP_CHECKPOINTS_DIR: /state/models
+      HF_HOME: /state/huggingface
+      TORCH_HOME: /state/torch
+      UV_CACHE_DIR: /state/uv-cache
+      XDG_CACHE_HOME: /state/cache
+    volumes:
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/models:/state/models:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/outputs:/opt/ACE-Step-1.5/gradio_outputs:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/huggingface:/state/huggingface:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/torch:/state/torch:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/uv-cache:/state/uv-cache:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/cache:/state/cache:rw
+    command:
+      - uv
+      - run
+      - --no-sync
+      - acestep
+      - --server-name
+      - 0.0.0.0
+      - --port
+      - "7860"
+      - --config_path
+      - "${ACESTEP_CONFIG_PATH:-acestep-v15-turbo}"
+      - --lm_model_path
+      - "${ACESTEP_LM_MODEL_PATH:-acestep-5Hz-lm-1.7B}"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${ACESTEP_GPU:-1}"]
+              capabilities: ["gpu"]
+
+  ace-step-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ACESTEP_REPO: ${ACESTEP_REPO:-https://github.com/ACE-Step/ACE-Step-1.5.git}
+        ACESTEP_REF: ${ACESTEP_REF:-main}
+    image: ${ACESTEP_IMAGE:-local/ace-step:1.5}
+    container_name: ace-step-api
+    restart: unless-stopped
+    profiles: ["api"]
+    ports:
+      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${ACESTEP_API_PORT:-8001}:8001"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      ACESTEP_CHECKPOINTS_DIR: /state/models
+      HF_HOME: /state/huggingface
+      TORCH_HOME: /state/torch
+      UV_CACHE_DIR: /state/uv-cache
+      XDG_CACHE_HOME: /state/cache
+    volumes:
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/models:/state/models:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/outputs:/opt/ACE-Step-1.5/gradio_outputs:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/huggingface:/state/huggingface:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/torch:/state/torch:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/uv-cache:/state/uv-cache:rw
+      - ${ACESTEP_DATA_ROOT:-/data/service/docker/ace-step}/cache:/state/cache:rw
+    command:
+      - uv
+      - run
+      - --no-sync
+      - acestep-api
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --config_path
+      - "${ACESTEP_CONFIG_PATH:-acestep-v15-turbo}"
+      - --lm_model_path
+      - "${ACESTEP_LM_MODEL_PATH:-acestep-5Hz-lm-1.7B}"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${ACESTEP_API_GPU:-1}"]
+              capabilities: ["gpu"]

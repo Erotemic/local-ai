@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.template
+.git
+.gitignore
+*.log
+__pycache__/
+*.py[cod]

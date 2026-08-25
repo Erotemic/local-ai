@@ -1,0 +1,30 @@
+services:
+  triposplat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
+        TRIPOSPLAT_REPO: ${TRIPOSPLAT_REPO:-https://github.com/VAST-AI-Research/TripoSplat.git}
+        TRIPOSPLAT_REF: ${TRIPOSPLAT_REF:-main}
+    image: ${TRIPOSPLAT_IMAGE:-local/triposplat:latest}
+    container_name: triposplat
+    restart: unless-stopped
+
+    ports:
+      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TRIPOSPLAT_PORT:-7861}:7860"
+
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+    volumes:
+      - ${HF_REPOS_ROOT:-/data/hf-repos}/VAST-AI/TripoSplat:/opt/TripoSplat/ckpts:ro
+      - ${TRIPOSPLAT_DATA_ROOT:-/data/service/triposplat}/outputs:/opt/TripoSplat/gradio_outputs:rw
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TRIPOSPLAT_GPU:-0}"]
+              capabilities: ["gpu"]

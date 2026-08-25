@@ -1,0 +1,8 @@
+# Canonical model repositories are mounted at /models/hf read-only.
+# Add service-specific mappings here when native ComfyUI loaders expect a
+# particular directory shape.
+minimax_h3:
+  base_path: /models/hf/Comfy-Org/MiniMax-H3
+  diffusion_models: diffusion_models
+  text_encoders: text_encoders
+  vae: vae
