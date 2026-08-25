@@ -1,0 +1,115 @@
+[service]
+name = "comfyui"
+display_name = "ComfyUI"
+description = "General ComfyUI service with optional versioned model bundles."
+compose_service = "comfyui"
+compose_build_target = "comfyui"
+bind_var = "LOCAL_AI_BIND_ADDRESS"
+port_var = "COMFYUI_PORT"
+gpu_var = "PRIMARY_GPU"
+
+[config]
+required = [
+  "HF_REPOS_ROOT",
+  "LOCAL_AI_SERVICE_ROOT",
+  "LOCAL_AI_WORKSPACES_ROOT",
+  "LOCAL_AI_BIND_ADDRESS",
+  "COMFY_DATA_ROOT",
+  "COMFYUI_PORT",
+  "BASE_COMFYUI_IMAGE",
+  "COMFYUI_IMAGE",
+  "COMFYUI_REF",
+  "USER_ID",
+  "GROUP_ID",
+  "PRIMARY_GPU",
+]
+
+[defaults]
+COMFY_DATA_ROOT = "{LOCAL_AI_SERVICE_ROOT}/comfyui"
+
+[model_selection]
+env = "COMFYUI_MODEL_BUNDLES"
+
+[runtime_resolver]
+when_var = "PRIMARY_GPU"
+when_value = "auto"
+set_var = "PRIMARY_GPU_RESOLVED"
+command = ["./scripts/gpu_topology.sh", "--best-index"]
+
+[[directories]]
+label = "Canonical model repositories"
+path = "{HF_REPOS_ROOT}"
+role = "Shared model repositories; mounted read-only at /models/hf"
+retention = "reconstructible"
+
+[[directories]]
+label = "ComfyUI service state"
+path = "{COMFY_DATA_ROOT}"
+role = "Private mutable ComfyUI state"
+retention = "service-owned"
+
+[[directories]]
+label = "ComfyUI models"
+path = "{COMFY_DATA_ROOT}/models"
+role = "Models installed or managed directly by ComfyUI"
+retention = "reconstructible unless locally authored"
+
+[[directories]]
+label = "Inputs"
+path = "{COMFY_DATA_ROOT}/input"
+role = "ComfyUI input files"
+retention = "user data"
+
+[[directories]]
+label = "Outputs"
+path = "{COMFY_DATA_ROOT}/output"
+role = "Generated media"
+retention = "review/backup as desired"
+
+[[directories]]
+label = "User data"
+path = "{COMFY_DATA_ROOT}/user"
+role = "ComfyUI user configuration/workflows"
+retention = "backup"
+
+[[directories]]
+label = "Custom nodes"
+path = "{COMFY_DATA_ROOT}/custom_nodes"
+role = "Mutable custom node checkouts"
+retention = "reconstructible if pinned elsewhere"
+
+[[directories]]
+label = "Hugging Face cache"
+path = "{COMFY_DATA_ROOT}/cache/huggingface"
+role = "ComfyUI-private download cache"
+retention = "disposable"
+
+[[directories]]
+label = "Torch cache"
+path = "{COMFY_DATA_ROOT}/cache/torch"
+role = "ComfyUI-private Torch cache"
+retention = "disposable"
+
+[[models]]
+name = "minimax-h3"
+label = "MiniMax H3 native ComfyUI bundle"
+required = false
+source = "huggingface"
+source_label = "hf://Comfy-Org/MiniMax-H3"
+repository = "Comfy-Org/MiniMax-H3"
+destination = "{HF_REPOS_ROOT}/Comfy-Org/MiniMax-H3"
+container_path = "/models/hf/Comfy-Org/MiniMax-H3"
+include = [
+  "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+  "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+  "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+  "vae/minimax_h3_video_vae_fp16.safetensors",
+  "vae/minimax_h3_audio_vae_fp32.safetensors",
+]
+check_files = [
+  "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+  "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+  "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+  "vae/minimax_h3_video_vae_fp16.safetensors",
+  "vae/minimax_h3_audio_vae_fp32.safetensors",
+]

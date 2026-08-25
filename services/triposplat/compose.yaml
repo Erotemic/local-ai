@@ -19,7 +19,7 @@ services:
 
     volumes:
       - ${HF_REPOS_ROOT:-/data/hf-repos}/VAST-AI/TripoSplat:/opt/TripoSplat/ckpts:ro
-      - ${TRIPOSPLAT_DATA_ROOT:-/data/service/triposplat}/outputs:/opt/TripoSplat/gradio_outputs:rw
+      - ${TRIPOSPLAT_DATA_ROOT:-/data/local-ai/services/triposplat}/outputs:/opt/TripoSplat/gradio_outputs:rw
 
     deploy:
       resources:

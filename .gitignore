@@ -2,6 +2,8 @@
 .env
 **/.env
 *.env.local
+.env.staging-*
+**/.env.staging-*
 
 # Local scratch files
 .cache/

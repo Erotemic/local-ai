@@ -2,83 +2,178 @@
 
 Version-controlled recipes for local generative-AI services.
 
-This repository is intentionally a collection rather than an orchestration
-framework. Each service owns its Docker image, Compose configuration, setup,
-and diagnostics. Shared conventions cover host storage, network exposure,
-secrets, and explicit data exchange.
+This repository is a collection of independently runnable local services, not an
+inference orchestration framework. Each service owns its Docker image, Compose
+configuration, model requirements, state, and lifecycle. A small shared Python
+helper makes first-run configuration and persistent storage explicit.
 
 ## Services
 
 | Service | Purpose | Default UI |
 | --- | --- | --- |
-| `comfyui` | General ComfyUI installation; MiniMax H3 is one supported model family | `http://127.0.0.1:8188` |
+| `comfyui` | General ComfyUI installation; model bundles are optional | `http://127.0.0.1:8188` |
 | `ace-step` | ACE-Step music/audio generation | `http://127.0.0.1:7860` |
 | `triposplat` | Single-image 3D Gaussian reconstruction | `http://127.0.0.1:7861` |
 
-`infer-stack` is intentionally not included yet. If it belongs here later, it
-can be added as another service without changing the role of this repository.
+`infer-stack` is intentionally not included yet. It can become another service
+later without changing this repository's role.
 
-## Layout
+## Normal workflow
+
+The normal contract is the same for every service:
+
+```bash
+cd ~/code/local-ai/services/triposplat
+./setup.sh
+./start.sh
+```
+
+On first use, `setup.sh`:
+
+1. stages the shared `../../.env` configuration and opens it in `$VISUAL`,
+   `$EDITOR`, `vim`, `vi`, or `nano`;
+2. does the same for the service-specific `.env`;
+3. validates both files and atomically installs them with mode `0600`;
+4. resolves and prints the exact host paths, model destinations, port, and GPU;
+5. creates the service directories;
+6. validates Docker, Compose, and NVIDIA prerequisites;
+7. builds the service image;
+8. provisions required model weights and verifies their expected layout;
+9. exits without starting the service.
+
+`start.sh` never creates configuration, downloads weights, or builds images. If
+setup is incomplete it stops and tells you to run `./setup.sh`.
+
+Re-run configuration editing explicitly with:
+
+```bash
+./setup.sh --edit
+```
+
+For scripted/bootstrap use where the checked-in defaults are desired:
+
+```bash
+./setup.sh --accept-defaults
+```
+
+## Storage contract
+
+Large data never lives in Git. The machine-wide defaults are configured once in
+`local-ai/.env`:
 
 ```text
-local-ai/
+/data/hf-repos/                 canonical explicitly downloaded model repos
+/data/local-ai/services/        private mutable service state
+/data/local-ai/workspaces/      intentionally shared project data
+```
+
+The default concrete service tree is:
+
+```text
+/data/local-ai/
 ├── services/
 │   ├── comfyui/
+│   │   ├── models/
+│   │   ├── input/
+│   │   ├── output/
+│   │   ├── user/
+│   │   ├── custom_nodes/
+│   │   └── cache/
 │   ├── ace-step/
+│   │   ├── models/
+│   │   ├── outputs/
+│   │   ├── huggingface/
+│   │   ├── torch/
+│   │   ├── uv-cache/
+│   │   └── cache/
 │   └── triposplat/
-├── scripts/
-├── docs/
-├── .env.template
-└── README.md
+│       └── outputs/
+└── workspaces/
 ```
 
-Large data does not live in Git. The default host conventions are:
+Canonical externally downloaded model repositories stay separate:
 
 ```text
-/data/hf-repos/                 canonical model repositories
-/data/service/<service>/        private mutable service state
-/data/local-ai/workspaces/      explicitly shared project data
+/data/hf-repos/
+├── Comfy-Org/
+│   └── MiniMax-H3/          # optional ComfyUI bundle
+└── VAST-AI/
+    └── TripoSplat/          # required TripoSplat weights
 ```
 
-Existing service paths are preserved where practical. In particular, ACE-Step
-continues to default to `/data/service/docker/ace-step` so adopting this repo
-does not require moving its current data.
+ACE-Step uses its explicit `models/` tree because upstream provides an
+`acestep-download` command that provisions the runtime's expected checkpoint
+layout. Its Hugging Face/Torch/uv caches remain separate and disposable.
 
-See `docs/data-layout.md` for ownership and sharing rules.
+See `docs/data-layout.md` for the retention and sharing rules.
 
-## First use
+## Model provisioning
 
-Initialize common directories:
+Required models are part of `./setup.sh`.
 
-```bash
-cp .env.template .env
-./scripts/init-data.sh
-./scripts/doctor.sh
-```
-
-Then configure and start a service from its own directory:
-
-```bash
-cd services/comfyui
-cp .env.template .env
-./setup.sh
-```
-
-or:
-
-```bash
-cd services/ace-step
-cp .env.template .env
-./setup.sh
-```
-
-or:
+TripoSplat therefore needs only:
 
 ```bash
 cd services/triposplat
-cp .env.template .env
-./scripts/download_weights.sh
 ./setup.sh
+```
+
+There is no separate download-before-setup step.
+
+ComfyUI itself has no required model bundle. Optional bundles are selected in
+`services/comfyui/.env`:
+
+```dotenv
+COMFYUI_MODEL_BUNDLES=minimax-h3
+```
+
+or for one setup invocation:
+
+```bash
+./setup.sh --with-model minimax-h3
+```
+
+Low-level model commands remain available for repair/maintenance, but refuse to
+invent configuration:
+
+```bash
+services/triposplat/scripts/download_weights.sh
+services/comfyui/scripts/download_minimax_h3_comfy.sh
+```
+
+If `.env` has not been initialized, they tell you to run `./setup.sh` first.
+Hugging Face downloads run through `uvx --from huggingface_hub hf`, so a global
+`hf` installation is not required.
+
+## Configuration layering
+
+The effective configuration is:
+
+```text
+checked-in service defaults
+        ↓
+local-ai/.env             machine-wide storage/network policy
+        ↓
+services/<name>/.env      service-specific choices/overrides
+```
+
+The root `.env` owns `HF_REPOS_ROOT`, `LOCAL_AI_SERVICE_ROOT`,
+`LOCAL_AI_WORKSPACES_ROOT`, and `LOCAL_AI_BIND_ADDRESS`. Service `.env` files do
+not duplicate those settings.
+
+## Inspecting a service
+
+Each service's doctor command prints its resolved storage/model plan and checks
+required data:
+
+```bash
+./scripts/doctor.sh
+```
+
+From the repository root, inspect all configured services with:
+
+```bash
+./scripts/doctor.sh
 ```
 
 ## Repository policy
@@ -88,8 +183,8 @@ cp .env.template .env
 - Bind web UIs to loopback by default. LAN exposure is an explicit setting.
 - Prefer canonical model stores mounted read-only into services.
 - Keep mutable state private to the service that owns it.
-- Exchange data through an explicitly chosen workspace instead of mounting one
+- Exchange data through an explicitly chosen workspace rather than mounting one
   service's private state into another.
-- Keep service-specific work service-specific. Shared tooling should stay small.
-- Pin upstream revisions when a setup becomes important enough that rebuild
-  reproducibility is required.
+- Keep service-specific work service-specific. Shared tooling stays limited to
+  setup/lifecycle mechanics.
+- Pin upstream revisions when rebuild reproducibility becomes important.

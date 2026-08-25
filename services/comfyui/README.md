@@ -1,71 +1,92 @@
 # ComfyUI service
 
 General local ComfyUI service. The service is not tied to one model family.
-MiniMax H3 support is retained from the setup that originally motivated this
-container, but additional ComfyUI models and workflows can use the same service.
+MiniMax H3 is retained as an optional declared model bundle rather than part of
+the service identity.
 
-## Storage
+## First use
 
-Defaults:
+```bash
+./setup.sh
+./start.sh
+```
+
+Setup initializes configuration, prints the storage plan, creates directories,
+and builds the image. ComfyUI itself has no required weight bundle.
+
+Default resolved state:
 
 ```text
-/data/hf-repos/          canonical shared model repositories, mounted read-only
-/data/service/comfyui/   mutable ComfyUI state
+/data/local-ai/services/comfyui/
+├── models/                 ComfyUI-managed/local models
+├── input/                  input files
+├── output/                 generated media
+├── user/                   user config/workflows
+├── custom_nodes/           mutable node checkouts
+└── cache/
+    ├── huggingface/        disposable cache
+    └── torch/              disposable cache
+
+/data/hf-repos/             canonical shared model repositories, mounted RO
 ```
 
-ComfyUI's mutable tree contains its own models, inputs, outputs, user data,
-custom nodes, and caches. Canonical Hugging Face repositories are mounted at
-`/models/hf` and can be exposed to ComfyUI through `extra_model_paths.yaml`.
+The UI defaults to `http://127.0.0.1:8188`.
 
-## Setup
+## Optional model bundles
 
-```bash
-cp .env.template .env
-./setup.sh
+Available now:
+
+```text
+minimax-h3
 ```
 
-The UI is available at `http://127.0.0.1:8188` by default.
+Select it while editing `.env`:
 
-Inspect GPU topology separately if useful:
-
-```bash
-./scripts/gpu_topology.sh
+```dotenv
+COMFYUI_MODEL_BUNDLES=minimax-h3
 ```
 
-`PRIMARY_GPU=auto` selects the GPU with the widest active PCIe link. Set a GPU
-index explicitly if that heuristic is not appropriate on the current host.
-
-## MiniMax H3
-
-MiniMax H3 is one optional model family supported by this ComfyUI service. The
-existing native-ComfyUI helper scripts are retained:
-
-```bash
-./scripts/download_minimax_h3_comfy.sh
-./scripts/check_minimax_h3_models.sh
-```
-
-They use the canonical repository path:
+Then ordinary setup provisions the selected files into:
 
 ```text
 /data/hf-repos/Comfy-Org/MiniMax-H3/
 ```
 
-The `extra_model_paths.yaml` mapping makes those weights available to native
-ComfyUI H3 workflows without copying them into ComfyUI's private model tree.
-
-## Diagnostics
+You can also request it for one setup run:
 
 ```bash
-./scripts/doctor.sh
+./setup.sh --with-model minimax-h3
 ```
+
+The existing mapping in `extra_model_paths.yaml` exposes that canonical tree to
+native ComfyUI model loaders without copying it into private ComfyUI state.
+Model-specific notes live in `docs/minimax-h3.md`.
+
+Low-level maintenance commands, after setup has initialized configuration:
+
+```bash
+./scripts/check_minimax_h3_models.sh
+./scripts/download_minimax_h3_comfy.sh
+```
+
+## GPU selection
+
+`PRIMARY_GPU=auto` selects the NVIDIA GPU with the widest active PCIe link. Set
+an explicit GPU index in `.env` if desired.
+
+Inspect topology with:
+
+```bash
+./scripts/gpu_topology.sh
+```
+
+## Start contract
+
+`./start.sh` does not create configuration, download model bundles, or build the
+image. It starts already-provisioned state with `docker compose up --no-build`.
 
 ## Network exposure
 
-The host bind address defaults to `127.0.0.1`. To expose ComfyUI beyond the
-local machine, set `LOCAL_AI_BIND_ADDRESS` explicitly in `.env` and consider the
-security implications of installed custom nodes before doing so.
-
-The previous setup used host IPC and an unconfined seccomp profile. Those are no
-longer defaults. If a specific workload proves to require either setting, add it
-locally with a Compose override and document why.
+The root `LOCAL_AI_BIND_ADDRESS` defaults to `127.0.0.1`. Broader exposure is
+explicit. The previous setup's host IPC and unconfined seccomp settings are not
+defaults here.

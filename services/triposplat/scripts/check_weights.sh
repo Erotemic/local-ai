@@ -1,36 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$SERVICE_DIR"
-
-if [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source ./.env
-  set +a
+ROOT_DIR="$(cd "$SERVICE_DIR/../.." && pwd)"
+if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
+  echo "ERROR: service configuration is not initialized." >&2
+  echo "Run ./setup.sh from $SERVICE_DIR before using this maintenance command." >&2
+  exit 1
 fi
-
-root="${HF_REPOS_ROOT:-/data/hf-repos}/VAST-AI/TripoSplat"
-quiet=0
-[[ "${1:-}" == "--quiet" ]] && quiet=1
-
-files=(
-  diffusion_models/triposplat_fp16.safetensors
-  vae/triposplat_vae_decoder_fp16.safetensors
-  clip_vision/dino_v3_vit_h.safetensors
-  vae/flux2-vae.safetensors
-  background_removal/birefnet.safetensors
-)
-
-missing=0
-for rel in "${files[@]}"; do
-  if [[ -f "$root/$rel" ]]; then
-    (( quiet )) || echo "OK      $root/$rel"
-  else
-    (( quiet )) || echo "MISSING $root/$rel"
-    missing=1
-  fi
-done
-
-exit "$missing"
+exec uv run "$ROOT_DIR/scripts/local_ai.py" model check triposplat --service-dir "$SERVICE_DIR" "$@"

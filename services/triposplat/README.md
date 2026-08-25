@@ -3,50 +3,69 @@
 Local TripoSplat Gradio service for reconstructing 3D Gaussians from a single
 input image.
 
-Upstream project:
-
-```text
-https://github.com/VAST-AI-Research/TripoSplat
-```
-
-The upstream demo supports variable Gaussian counts up to 262,144 and exports
-`.ply` or `.splat` files.
-
-## Storage
-
-Defaults:
-
-```text
-/data/hf-repos/VAST-AI/TripoSplat/   canonical checkpoint tree, mounted read-only
-/data/service/triposplat/outputs/    generated outputs
-```
-
-Weights are deliberately not baked into the Docker image.
-
-## Setup
+## First use
 
 ```bash
-cp .env.template .env
-./scripts/download_weights.sh
 ./setup.sh
+./start.sh
 ```
 
-The UI is available at `http://127.0.0.1:7861` by default. Port 7861 avoids the
-ACE-Step default on 7860.
+Do not download weights first. Setup initializes configuration, shows the exact
+checkpoint destination, creates the directories, builds the image, downloads the
+required TripoSplat repository, verifies it, and then exits.
 
-## GPU
+Default resolved storage:
 
-The default is host GPU 0. Set `TRIPOSPLAT_GPU` in `.env` to select another
-NVIDIA device.
+```text
+/data/hf-repos/VAST-AI/TripoSplat/       required canonical weights, read-only in container
+/data/local-ai/services/triposplat/      private service state
+└── outputs/                             generated .ply/.splat assets
+```
+
+The UI defaults to `http://127.0.0.1:7861`.
+
+## Configuration
+
+`./setup.sh` creates/edits both the root machine configuration and this service's
+`.env` when needed. Reopen them later with:
+
+```bash
+./setup.sh --edit
+```
+
+Service-specific choices include `TRIPOSPLAT_GPU`, `TRIPOSPLAT_PORT`, upstream
+revision/image settings, and an optional `TRIPOSPLAT_DATA_ROOT` override. Leave
+the data-root override blank to inherit `/data/local-ai/services/triposplat`.
+
+## Weights
+
+The required bundle is declared in `service.toml`:
+
+```text
+source:       hf://VAST-AI/TripoSplat
+destination: /data/hf-repos/VAST-AI/TripoSplat
+container:   /opt/TripoSplat/ckpts (read-only)
+```
+
+Normal setup provisions it automatically. The low-level maintenance commands
+remain available after configuration exists:
+
+```bash
+./scripts/check_weights.sh
+./scripts/download_weights.sh
+```
+
+Downloads use `uvx --from huggingface_hub hf`, so a global `hf` command is not
+required.
+
+## Start contract
+
+`./start.sh` does not create `.env`, download weights, or build the image. It
+checks that required model data and directories are present and starts with
+`docker compose up --no-build`.
 
 ## Reproducibility
 
 `TRIPOSPLAT_REF` defaults to `main` while this service is exploratory. Pin it to
 a known commit when a working configuration becomes worth preserving exactly.
-The PyTorch CUDA wheel index is also configurable through `TORCH_INDEX_URL`.
-
-## Diagnostics
-
-```bash
-./scripts/doctor.sh
-```
+The PyTorch CUDA wheel index is configurable through `TORCH_INDEX_URL`.

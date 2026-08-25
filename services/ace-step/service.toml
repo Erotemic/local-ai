@@ -1,0 +1,93 @@
+[service]
+name = "ace-step"
+display_name = "ACE-Step"
+description = "ACE-Step 1.5 music/audio generation service."
+compose_service = "ace-step-ui"
+compose_build_target = "ace-step-ui"
+bind_var = "LOCAL_AI_BIND_ADDRESS"
+port_var = "ACESTEP_UI_PORT"
+gpu_var = "ACESTEP_GPU"
+
+[config]
+required = [
+  "LOCAL_AI_SERVICE_ROOT",
+  "LOCAL_AI_WORKSPACES_ROOT",
+  "LOCAL_AI_BIND_ADDRESS",
+  "ACESTEP_DATA_ROOT",
+  "ACESTEP_UI_PORT",
+  "ACESTEP_API_PORT",
+  "ACESTEP_GPU",
+  "ACESTEP_API_GPU",
+  "ACESTEP_CONFIG_PATH",
+  "ACESTEP_LM_MODEL_PATH",
+  "ACESTEP_DOWNLOAD_SOURCE",
+  "ACESTEP_REPO",
+  "ACESTEP_REF",
+  "ACESTEP_IMAGE",
+]
+
+[defaults]
+ACESTEP_DATA_ROOT = "{LOCAL_AI_SERVICE_ROOT}/ace-step"
+
+[[directories]]
+label = "ACE-Step service state"
+path = "{ACESTEP_DATA_ROOT}"
+role = "Private mutable ACE-Step state"
+retention = "service-owned"
+
+[[directories]]
+label = "Model checkpoints"
+path = "{ACESTEP_DATA_ROOT}/models"
+role = "Explicitly provisioned ACE-Step checkpoints"
+retention = "reconstructible"
+
+[[directories]]
+label = "Generated outputs"
+path = "{ACESTEP_DATA_ROOT}/outputs"
+role = "Generated audio"
+retention = "review/backup as desired"
+
+[[directories]]
+label = "Hugging Face cache"
+path = "{ACESTEP_DATA_ROOT}/huggingface"
+role = "ACE-Step-private Hugging Face cache"
+retention = "disposable"
+
+[[directories]]
+label = "Torch cache"
+path = "{ACESTEP_DATA_ROOT}/torch"
+role = "ACE-Step-private Torch cache"
+retention = "disposable"
+
+[[directories]]
+label = "uv cache"
+path = "{ACESTEP_DATA_ROOT}/uv-cache"
+role = "ACE-Step-private uv cache"
+retention = "disposable"
+
+[[directories]]
+label = "Application cache"
+path = "{ACESTEP_DATA_ROOT}/cache"
+role = "Other application cache"
+retention = "disposable"
+
+[[models]]
+name = "main"
+label = "ACE-Step 1.5 main model bundle"
+required = true
+source = "compose-command"
+source_label = "ACE-Step acestep-download ({ACESTEP_DOWNLOAD_SOURCE})"
+destination = "{ACESTEP_DATA_ROOT}/models"
+container_path = "/state/models"
+compose_service = "ace-step-ui"
+command = [
+  "uv", "run", "--no-sync", "acestep-download",
+  "--dir", "/state/models",
+  "--download-source", "{ACESTEP_DOWNLOAD_SOURCE}",
+]
+check_dirs = [
+  "vae",
+  "Qwen3-Embedding-0.6B",
+  "acestep-v15-turbo",
+  "acestep-5Hz-lm-1.7B",
+]

@@ -1,0 +1,62 @@
+[service]
+name = "triposplat"
+display_name = "TripoSplat"
+description = "Single-image 3D Gaussian reconstruction service."
+compose_service = "triposplat"
+compose_build_target = "triposplat"
+bind_var = "LOCAL_AI_BIND_ADDRESS"
+port_var = "TRIPOSPLAT_PORT"
+gpu_var = "TRIPOSPLAT_GPU"
+
+[config]
+required = [
+  "HF_REPOS_ROOT",
+  "LOCAL_AI_SERVICE_ROOT",
+  "LOCAL_AI_WORKSPACES_ROOT",
+  "LOCAL_AI_BIND_ADDRESS",
+  "TRIPOSPLAT_DATA_ROOT",
+  "TRIPOSPLAT_PORT",
+  "TRIPOSPLAT_GPU",
+  "TRIPOSPLAT_REPO",
+  "TRIPOSPLAT_REF",
+  "TRIPOSPLAT_IMAGE",
+  "TORCH_INDEX_URL",
+]
+
+[defaults]
+TRIPOSPLAT_DATA_ROOT = "{LOCAL_AI_SERVICE_ROOT}/triposplat"
+
+[[directories]]
+label = "Canonical TripoSplat weights"
+path = "{HF_REPOS_ROOT}/VAST-AI/TripoSplat"
+role = "Required checkpoint repository; mounted read-only at /opt/TripoSplat/ckpts"
+retention = "reconstructible"
+
+[[directories]]
+label = "Service state"
+path = "{TRIPOSPLAT_DATA_ROOT}"
+role = "Private mutable TripoSplat state"
+retention = "service-owned"
+
+[[directories]]
+label = "Generated outputs"
+path = "{TRIPOSPLAT_DATA_ROOT}/outputs"
+role = "Generated .ply/.splat assets"
+retention = "review/backup as desired"
+
+[[models]]
+name = "triposplat"
+label = "VAST-AI/TripoSplat"
+required = true
+source = "huggingface"
+source_label = "hf://VAST-AI/TripoSplat"
+repository = "VAST-AI/TripoSplat"
+destination = "{HF_REPOS_ROOT}/VAST-AI/TripoSplat"
+container_path = "/opt/TripoSplat/ckpts"
+check_files = [
+  "diffusion_models/triposplat_fp16.safetensors",
+  "vae/triposplat_vae_decoder_fp16.safetensors",
+  "clip_vision/dino_v3_vit_h.safetensors",
+  "vae/flux2-vae.safetensors",
+  "background_removal/birefnet.safetensors",
+]
