@@ -880,3 +880,47 @@ container, so do not misrecord Ruff as having been run there. Python compilation
 `git diff --check`, and the full pytest suite passed. The implementation had
 already passed the earlier Wavhost test cycles before this documentation/test
 polish as well.
+
+
+### 2026-10-04 — Native Wavhost Kokoro GPU serving and storage-path split-brain
+
+Provisioning `kokoro` correctly wrote `hexgrad/kokoro:latest`, but local-ai's
+service manifest initially checked `registry/kokoro/kokoro/latest`. The durable
+paths are `manifests/registry/hexgrad/kokoro/latest` and
+`checkpoints/hexgrad/kokoro/latest`.
+
+A subsequent `./compose.sh run ... wavhost run kokoro` reported that Kokoro was
+not installed even though setup found the manifest. This exposed a second
+duplicate authority: `local_ai.py` resolves blank `TTS_DATA_ROOT` from the
+manifest as `{LOCAL_AI_SERVICE_ROOT}/tts`, while the Compose file had its own
+hard-coded fallback. On a machine whose existing `LOCAL_AI_SERVICE_ROOT` already
+ended in `/tts`, setup therefore inspected `/data/services/local-ai/tts/tts`
+while raw Compose mounted `/data/services/local-ai/tts`. The files were real;
+the container was looking at a different tree. `compose.sh` now delegates to a
+generic `local_ai.py compose` command so setup/start/direct Compose operations
+share the same resolved environment and manifest defaults. The Compose file now
+also requires resolved `TTS_DATA_ROOT` / `HF_REPOS_ROOT` values instead of
+falling back silently, so bypassing the wrapper fails early rather than mounting
+a plausible wrong tree.
+
+Wavhost's `KokoroBackend` already supports CUDA (`KModel(...).to(device)`), but
+the HTTP server previously had no device override and the Kokoro registry entry
+recommends CPU. Wavhost now exposes a server-wide `WAVHOST_DEVICE` policy and
+`wavhost serve --device`. `auto` preserves per-model recommendations; explicit
+`cuda`, `cpu`, or `mps` overrides them. The local-ai GPU TTS container defaults
+to `WAVHOST_DEVICE=cuda`, enabling native GPU Kokoro through the same
+`/v1/audio/speech` endpoint. Explicit unavailable accelerators fail instead of
+silently producing a misleading CPU benchmark.
+
+A dedicated `benchmark.sh wavhost-kokoro` target uses the Wavhost endpoint while
+`benchmark.sh kokoro` continues to mean the standalone Remsky Kokoro-FastAPI GPU
+service. Future measurements should record both separately in
+`dev/benchmarks/tts_measurements.csv`.
+
+Validation for this GPU-Kokoro/device-policy pass: Wavhost `pytest` completed
+with **199 passed, 4 skipped**. Shell syntax, Python compilation, TOML parsing,
+and `git diff --check` also passed. A fake-Docker exercise of
+`local_ai.py compose` using `LOCAL_AI_SERVICE_ROOT=/data/services/local-ai/tts`
+resolved `TTS_DATA_ROOT=/data/services/local-ai/tts/tts` and preserved a caller
+`TTS_QWENTTS_CLAMP_FP16=0` override, confirming that direct lifecycle operations
+now agree with setup while retaining experiment overrides.

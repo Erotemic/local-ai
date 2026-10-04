@@ -19,11 +19,12 @@ services:
       HF_HOME: /state/cache/huggingface
       TORCH_HOME: /state/cache/torch
       XDG_CACHE_HOME: /state/cache
+      WAVHOST_DEVICE: ${WAVHOST_DEVICE:-cuda}
       WAVHOST_QWEN_DTYPE: ${WAVHOST_QWEN_DTYPE:-auto}
       WAVHOST_BACKEND_CACHE_SIZE: ${WAVHOST_BACKEND_CACHE_SIZE:-1}
       PYTHONUNBUFFERED: "1"
     volumes:
-      - ${TTS_DATA_ROOT:-/data/services/local-ai/tts}/wavhost:/state:rw
+      - ${TTS_DATA_ROOT:?run ./setup.sh and use ./compose.sh}/wavhost:/state:rw
     command:
       - wavhost
       - serve
@@ -62,7 +63,7 @@ services:
       CLAMP_FP16: ${TTS_QWENTTS_CLAMP_FP16:-1}
       NO_FA: ${TTS_QWENTTS_NO_FA:-0}
     volumes:
-      - ${HF_REPOS_ROOT:-/data/services/hf-repos}/Serveurperso/Qwen3-TTS-GGUF:/models:ro
+      - ${HF_REPOS_ROOT:?run ./setup.sh and use ./compose.sh}/Serveurperso/Qwen3-TTS-GGUF:/models:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 30s

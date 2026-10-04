@@ -90,11 +90,17 @@ Those are deliberately separate fixes: the container chooses a compatible
 PyTorch binary, while Wavhost itself chooses a dtype the selected device can
 execute.
 
-The service passes:
+The service explicitly runs Wavhost backends on its reserved GPU:
 
 ```dotenv
+WAVHOST_DEVICE=cuda
 WAVHOST_QWEN_DTYPE=auto
 ```
+
+`WAVHOST_DEVICE` is a server-wide Wavhost policy. `auto` preserves each registry
+model's recommendation; `cuda` makes HTTP-served Kokoro use the GPU as well as
+Qwen. This local-ai recipe defaults to `cuda` because the container already has
+a dedicated NVIDIA device reservation.
 
 For the 1080 Ti, `auto` resolves to FP32. Consumer Pascal has weak FP16
 arithmetic throughput, so FP32 is the conservative default. It is still useful
@@ -234,10 +240,18 @@ The compatibility server deliberately retains the image already in use:
 ghcr.io/remsky/kokoro-fastapi-gpu:v0.3.0-amd64
 ```
 
-It is pinned to one selected GPU rather than exposing all GPUs. Wavhost can also
-serve its own `kokoro` model for interface comparison, but that is an optional
-model bundle and is not assumed to match the performance characteristics of the
-specialized Kokoro-FastAPI GPU image.
+It is pinned to one selected GPU rather than exposing all GPUs. Wavhost can also serve its own `kokoro` model. This recipe sets
+`WAVHOST_DEVICE=cuda`, so native Wavhost Kokoro uses the same reserved GPU rather
+than the registry's CPU recommendation. Benchmark it independently from the
+specialized Kokoro-FastAPI image:
+
+```bash
+./setup.sh --accept-defaults --with-model kokoro
+./start.sh
+./scripts/benchmark.sh wavhost-kokoro 3
+./start-kokoro.sh
+./scripts/benchmark.sh kokoro 3
+```
 
 ## Quantized Q8_0 experiment with qwentts.cpp
 

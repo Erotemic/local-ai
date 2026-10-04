@@ -695,6 +695,37 @@ def cmd_start(args: argparse.Namespace) -> None:
         console.print(f"[green]{manifest['service'].get('display_name', target)}:[/green] http://{env[bind_var]}:{env[port_var]}")
 
 
+def cmd_compose(args: argparse.Namespace) -> None:
+    """Run Docker Compose with the same resolved configuration used by setup/start."""
+    service_dir = Path(args.service_dir).resolve()
+    repo_root = repo_root_from_service(service_dir)
+    manifest = load_manifest(service_dir)
+    require_config(repo_root, service_dir)
+    env = effective_env(repo_root, service_dir, manifest)
+    validate_effective_env(env, manifest)
+    env = prepare_runtime_env(service_dir, manifest, env)
+    compose_args = list(args.compose_args)
+    if compose_args and compose_args[0] == "--":
+        compose_args.pop(0)
+    if not compose_args:
+        raise LocalAIError("compose requires arguments after --")
+    # Direct lifecycle commands intentionally allow one-shot overrides from the
+    # caller (for example TTS_QWENTTS_CLAMP_FP16=0 ./compose.sh up ...).
+    # setup/start keep checked-in config authoritative; this compose passthrough
+    # is the explicit escape hatch for experiments.
+    compose_env = dict(env)
+    for key in env:
+        if key in os.environ:
+            compose_env[key] = os.environ[key]
+    completed = run_command(
+        ["docker", "compose", *compose_args],
+        cwd=service_dir,
+        env=compose_env,
+        check=False,
+    )
+    raise SystemExit(completed.returncode)
+
+
 def cmd_show(args: argparse.Namespace) -> None:
     service_dir = Path(args.service_dir).resolve()
     repo_root = repo_root_from_service(service_dir)
@@ -804,6 +835,11 @@ def build_parser() -> argparse.ArgumentParser:
     start = subparsers.add_parser("start")
     start.add_argument("--service-dir", required=True)
     start.set_defaults(func=cmd_start)
+
+    compose = subparsers.add_parser("compose", help="run Docker Compose with resolved service configuration")
+    compose.add_argument("--service-dir", required=True)
+    compose.add_argument("compose_args", nargs=argparse.REMAINDER)
+    compose.set_defaults(func=cmd_compose)
 
     show = subparsers.add_parser("show")
     show.add_argument("--service-dir", required=True)

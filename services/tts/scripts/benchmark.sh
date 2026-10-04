@@ -29,6 +29,15 @@ case "$backend" in
     runtime_image="${TTS_WAVHOST_IMAGE:-local/wavhost:pascal}"
     runtime_container="ai-voice-wavhost"
     ;;
+  wavhost-kokoro)
+    base_url="http://${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_WAVHOST_PORT:-11435}"
+    model="${TTS_BENCH_KOKORO_MODEL:-kokoro}"
+    voice="${TTS_BENCH_KOKORO_VOICE:-af_heart}"
+    gpu="${TTS_WAVHOST_GPU:-}"
+    dtype="n/a"
+    runtime_image="${TTS_WAVHOST_IMAGE:-local/wavhost:pascal}"
+    runtime_container="ai-voice-wavhost"
+    ;;
   qwentts)
     base_url="http://${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_QWENTTS_PORT:-11436}"
     model="${TTS_BENCH_QWENTTS_MODEL:-qwen-0.6-customvoice-q8-ggml}"
@@ -48,7 +57,7 @@ case "$backend" in
     runtime_container="ai-voice-kokoro"
     ;;
   *)
-    echo "usage: $0 [wavhost|qwentts|kokoro] [runs]" >&2
+    echo "usage: $0 [wavhost|wavhost-kokoro|qwentts|kokoro] [runs]" >&2
     exit 2
     ;;
 esac
@@ -96,6 +105,7 @@ runtime_language=""
 runtime_model_path=""
 runtime_codec_path=""
 runtime_model_alias=""
+runtime_wavhost_device=""
 runtime_wavhost_dtype=""
 runtime_wavhost_cache_size=""
 
@@ -117,7 +127,8 @@ if command -v docker >/dev/null 2>&1; then
     runtime_model_path="$(container_env_value MODEL_PATH)"
     runtime_codec_path="$(container_env_value CODEC_PATH)"
     runtime_model_alias="$(container_env_value MODEL_ALIAS)"
-  elif [[ "$backend" == "wavhost" ]]; then
+  elif [[ "$backend" == "wavhost" || "$backend" == "wavhost-kokoro" ]]; then
+    runtime_wavhost_device="$(container_env_value WAVHOST_DEVICE)"
     runtime_wavhost_dtype="$(container_env_value WAVHOST_QWEN_DTYPE)"
     runtime_wavhost_cache_size="$(container_env_value WAVHOST_BACKEND_CACHE_SIZE)"
   fi
@@ -130,7 +141,7 @@ RUNTIME_IMAGE="$runtime_image" RUNTIME_IMAGE_ID="$runtime_image_id" RUNTIME_CONT
 RUNTIME_CLAMP_FP16="$runtime_clamp_fp16" RUNTIME_NO_FA="$runtime_no_fa" \
 RUNTIME_LANGUAGE="$runtime_language" RUNTIME_MODEL_PATH="$runtime_model_path" \
 RUNTIME_CODEC_PATH="$runtime_codec_path" RUNTIME_MODEL_ALIAS="$runtime_model_alias" \
-RUNTIME_WAVHOST_DTYPE="$runtime_wavhost_dtype" RUNTIME_WAVHOST_CACHE_SIZE="$runtime_wavhost_cache_size" \
+RUNTIME_WAVHOST_DEVICE="$runtime_wavhost_device" RUNTIME_WAVHOST_DTYPE="$runtime_wavhost_dtype" RUNTIME_WAVHOST_CACHE_SIZE="$runtime_wavhost_cache_size" \
 python3 - <<'PY' > "$run_dir/metadata.json"
 import json
 import os
@@ -143,6 +154,7 @@ for key, env_key in [
     ("model_path", "RUNTIME_MODEL_PATH"),
     ("codec_path", "RUNTIME_CODEC_PATH"),
     ("model_alias", "RUNTIME_MODEL_ALIAS"),
+    ("wavhost_device", "RUNTIME_WAVHOST_DEVICE"),
     ("wavhost_qwen_dtype", "RUNTIME_WAVHOST_DTYPE"),
     ("wavhost_backend_cache_size", "RUNTIME_WAVHOST_CACHE_SIZE"),
 ]:
@@ -175,13 +187,13 @@ printf '%s\n' "$payload" > "$run_dir/request.json"
 echo "backend=$backend url=$base_url model=$model voice=$voice runs=$runs dtype=$dtype gpu=$actual_gpu"
 if [[ "$backend" == "qwentts" ]]; then
   echo "runtime_knobs=clamp_fp16=${runtime_clamp_fp16:-unknown} no_fa=${runtime_no_fa:-unknown} language=${runtime_language:-unknown}"
-elif [[ "$backend" == "wavhost" ]]; then
-  echo "runtime_knobs=qwen_dtype=${runtime_wavhost_dtype:-unknown} backend_cache_size=${runtime_wavhost_cache_size:-unknown}"
+elif [[ "$backend" == "wavhost" || "$backend" == "wavhost-kokoro" ]]; then
+  echo "runtime_knobs=device=${runtime_wavhost_device:-unknown} qwen_dtype=${runtime_wavhost_dtype:-unknown} backend_cache_size=${runtime_wavhost_cache_size:-unknown}"
 fi
 echo "artifacts=$run_dir"
 echo "note=benchmark.sh does not reset the server/model cache; phase=first means first request in this invocation, not necessarily a cold model load"
 
-if [[ "$backend" == "qwentts" || "$backend" == "wavhost" ]]; then
+if [[ "$backend" == "qwentts" || "$backend" == "wavhost" || "$backend" == "wavhost-kokoro" ]]; then
   if ! curl -fsS --max-time 3 "$base_url/health" >/dev/null 2>&1; then
     echo "ERROR: $backend is not healthy at $base_url/health; refusing to start a benchmark." >&2
     if command -v docker >/dev/null 2>&1; then

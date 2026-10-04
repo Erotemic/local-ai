@@ -10,15 +10,10 @@ if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
   exit 1
 fi
 
-# Compose normally reads only services/tts/.env when invoked from this
-# directory. The machine-wide storage/network policy lives in ../../.env, so a
-# raw `docker compose ...` can silently fall back to compose.yaml defaults when
-# recreating a container. Always supply both files explicitly. Environment
-# variables exported by the caller still have normal Compose precedence, which
-# makes one-off experiment overrides safe and reproducible.
-exec docker compose \
-  --env-file "$ROOT_DIR/.env" \
-  --env-file "$SERVICE_DIR/.env" \
-  -f "$SERVICE_DIR/compose.yaml" \
-  --project-directory "$SERVICE_DIR" \
-  "$@"
+# Do not duplicate manifest-default resolution in shell/Compose. Delegate to the
+# same helper used by setup/start so blank TTS_DATA_ROOT and other derived values
+# resolve identically for every lifecycle path. Caller environment overrides are
+# preserved by local_ai.py's host_command_env().
+exec uv run "$ROOT_DIR/scripts/local_ai.py" compose \
+  --service-dir "$SERVICE_DIR" \
+  -- "$@"

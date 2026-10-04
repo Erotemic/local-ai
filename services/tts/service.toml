@@ -18,6 +18,7 @@ required = [
   "TTS_WAVHOST_PORT",
   "TTS_WAVHOST_GPU",
   "TTS_WAVHOST_IMAGE",
+  "WAVHOST_DEVICE",
   "WAVHOST_QWEN_DTYPE",
   "WAVHOST_BACKEND_CACHE_SIZE",
   "TTS_TORCH_VERSION",
@@ -129,8 +130,8 @@ label = "Kokoro 82M via Wavhost"
 required = false
 source = "compose-command"
 source_label = "Wavhost registry / hexgrad/Kokoro-82M"
-destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/kokoro/kokoro"
-container_path = "/state/.wavhost/models/checkpoints/kokoro/kokoro/latest"
+destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/hexgrad/kokoro"
+container_path = "/state/.wavhost/models/checkpoints/hexgrad/kokoro/latest"
 compose_service = "wavhost"
 command = ["wavhost", "pull", "kokoro", "--skip-deps", "--yes"]
 check_files = ["latest"]
