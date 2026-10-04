@@ -18,8 +18,8 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
 
     volumes:
-      - ${HF_REPOS_ROOT:-/data/hf-repos}/VAST-AI/TripoSplat:/opt/TripoSplat/ckpts:ro
-      - ${TRIPOSPLAT_DATA_ROOT:-/data/local-ai/services/triposplat}/outputs:/opt/TripoSplat/gradio_outputs:rw
+      - ${HF_REPOS_ROOT:-/data/services/hf-repos}/VAST-AI/TripoSplat:/opt/TripoSplat/ckpts:ro
+      - ${TRIPOSPLAT_DATA_ROOT:-/data/services/local-ai/triposplat}/outputs:/opt/TripoSplat/gradio_outputs:rw
 
     deploy:
       resources:

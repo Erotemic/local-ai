@@ -33,7 +33,9 @@ Run:
 
 `setup.sh` initializes the service config, builds Wavhost from the checked-out
 `submodules/wavhost` source, downloads the selected Wavhost model, and pulls the
-pinned Kokoro baseline image. `start.sh` starts only Wavhost.
+pinned Kokoro baseline image. Model provisioning passes Wavhost `--yes` after
+showing the model license so setup never pauses for a second license prompt.
+`start.sh` starts only Wavhost.
 
 Start the Kokoro baseline separately when you want an A/B comparison:
 
@@ -57,7 +59,7 @@ RTF below 1 means synthesis is faster than playback.
 For example, a run creates a directory resembling:
 
 ```text
-/data/local-ai/services/tts/benchmarks/20261004T191500Z-wavhost-qwen-0.6-customvoice-Ryan/
+/data/services/local-ai/tts/benchmarks/20261004T191500Z-wavhost-qwen-0.6-customvoice-Ryan/
 ├── input.txt
 ├── metadata.json
 ├── request.json
@@ -159,7 +161,7 @@ TTS_WAVHOST_MODELS=qwen-0.6-customvoice,qwen-1.7-customvoice
 The Wavhost model store is persistent under:
 
 ```text
-/data/local-ai/services/tts/wavhost/.wavhost/
+/data/services/local-ai/tts/wavhost/.wavhost/
 ```
 
 by default. The Hugging Face/Torch caches are beneath the same service-owned

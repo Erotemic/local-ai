@@ -23,7 +23,7 @@ services:
       WAVHOST_BACKEND_CACHE_SIZE: ${WAVHOST_BACKEND_CACHE_SIZE:-1}
       PYTHONUNBUFFERED: "1"
     volumes:
-      - ${TTS_DATA_ROOT:-/data/local-ai/services/tts}/wavhost:/state:rw
+      - ${TTS_DATA_ROOT:-/data/services/local-ai/tts}/wavhost:/state:rw
     command:
       - wavhost
       - serve

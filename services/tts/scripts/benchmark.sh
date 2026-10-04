@@ -53,7 +53,7 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
-data_root="${TTS_DATA_ROOT:-${LOCAL_AI_SERVICE_ROOT:-/data/local-ai/services}/tts}"
+data_root="${TTS_DATA_ROOT:-${LOCAL_AI_SERVICE_ROOT:-/data/services/local-ai}/tts}"
 output_root="${TTS_BENCH_OUTPUT_DIR:-$data_root/benchmarks}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 slug_model="${model//[^A-Za-z0-9._-]/_}"

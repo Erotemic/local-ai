@@ -8,20 +8,22 @@ stays outside it.
 The root `.env` defines three machine-wide locations:
 
 ```text
-HF_REPOS_ROOT=/data/hf-repos
-LOCAL_AI_SERVICE_ROOT=/data/local-ai/services
-LOCAL_AI_WORKSPACES_ROOT=/data/local-ai/workspaces
+HF_REPOS_ROOT=/data/services/hf-repos
+LOCAL_AI_SERVICE_ROOT=/data/services/local-ai
+LOCAL_AI_WORKSPACES_ROOT=/data/services/local-ai/workspaces
 ```
 
 Every `./setup.sh` prints the resolved paths before creating directories or
-downloading model data.
+downloading model data. `LOCAL_AI_SERVICE_ROOT` is the shared parent for
+service-private state; service manifests append their own service name. For
+example, TTS resolves to `/data/services/local-ai/tts`.
 
 ## Canonical model repositories
 
 Default:
 
 ```text
-/data/hf-repos/
+/data/services/hf-repos/
 ```
 
 Use this for explicitly provisioned Hugging Face repositories that are useful
@@ -31,7 +33,7 @@ read-only.
 Current declared repositories:
 
 ```text
-/data/hf-repos/
+/data/services/hf-repos/
 ├── Comfy-Org/
 │   └── MiniMax-H3/
 │       ├── diffusion_models/
@@ -53,13 +55,13 @@ only if avoiding a future redownload is valuable.
 Default:
 
 ```text
-/data/local-ai/services/
+/data/services/local-ai/
 ```
 
 Concrete layout:
 
 ```text
-/data/local-ai/services/
+/data/services/local-ai/
 ├── comfyui/
 │   ├── models/              # ComfyUI-managed/local model files
 │   ├── input/               # user inputs
@@ -113,7 +115,7 @@ API synthesis.
 Default:
 
 ```text
-/data/local-ai/workspaces/<project>/
+/data/services/local-ai/workspaces/<project>/
 ```
 
 A workspace contains data intentionally exchanged between services: source

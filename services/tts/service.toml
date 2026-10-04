@@ -71,7 +71,7 @@ source_label = "Wavhost registry / Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/qwen/qwen-0.6-customvoice"
 container_path = "/state/.wavhost/models/checkpoints/qwen/qwen-0.6-customvoice/latest"
 compose_service = "wavhost"
-command = ["wavhost", "pull", "qwen-0.6-customvoice", "--skip-deps"]
+command = ["wavhost", "pull", "qwen-0.6-customvoice", "--skip-deps", "--yes"]
 check_files = ["latest"]
 
 [[models]]
@@ -83,7 +83,7 @@ source_label = "Wavhost registry / Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
 destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/qwen/qwen-1.7-customvoice"
 container_path = "/state/.wavhost/models/checkpoints/qwen/qwen-1.7-customvoice/latest"
 compose_service = "wavhost"
-command = ["wavhost", "pull", "qwen-1.7-customvoice", "--skip-deps"]
+command = ["wavhost", "pull", "qwen-1.7-customvoice", "--skip-deps", "--yes"]
 check_files = ["latest"]
 
 [[models]]
@@ -95,7 +95,7 @@ source_label = "Wavhost registry / Qwen/Qwen3-TTS-12Hz-0.6B-Base"
 destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/qwen/qwen-0.6-base"
 container_path = "/state/.wavhost/models/checkpoints/qwen/qwen-0.6-base/latest"
 compose_service = "wavhost"
-command = ["wavhost", "pull", "qwen-0.6-base", "--skip-deps"]
+command = ["wavhost", "pull", "qwen-0.6-base", "--skip-deps", "--yes"]
 check_files = ["latest"]
 
 [[models]]
@@ -107,7 +107,7 @@ source_label = "Wavhost registry / Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/qwen/qwen-1.7-base"
 container_path = "/state/.wavhost/models/checkpoints/qwen/qwen-1.7-base/latest"
 compose_service = "wavhost"
-command = ["wavhost", "pull", "qwen-1.7-base", "--skip-deps"]
+command = ["wavhost", "pull", "qwen-1.7-base", "--skip-deps", "--yes"]
 check_files = ["latest"]
 
 [[models]]
@@ -119,5 +119,5 @@ source_label = "Wavhost registry / hexgrad/Kokoro-82M"
 destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/kokoro/kokoro"
 container_path = "/state/.wavhost/models/checkpoints/kokoro/kokoro/latest"
 compose_service = "wavhost"
-command = ["wavhost", "pull", "kokoro", "--skip-deps"]
+command = ["wavhost", "pull", "kokoro", "--skip-deps", "--yes"]
 check_files = ["latest"]

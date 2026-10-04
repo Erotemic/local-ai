@@ -10,13 +10,13 @@ The original MiniMax repository remains useful for Diffusers, SGLang,
 vLLM-style runtimes, conversion, and experimentation:
 
 ```text
-/data/hf-repos/MiniMaxAI/MiniMax-H3/
+/data/services/hf-repos/MiniMaxAI/MiniMax-H3/
 ```
 
 Native ComfyUI H3 workflows use repackaged files from `Comfy-Org/MiniMax-H3`:
 
 ```text
-/data/hf-repos/Comfy-Org/MiniMax-H3/
+/data/services/hf-repos/Comfy-Org/MiniMax-H3/
 ```
 
 Do not duplicate those files under ComfyUI private state. The service mounts the

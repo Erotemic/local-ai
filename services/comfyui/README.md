@@ -17,7 +17,7 @@ and builds the image. ComfyUI itself has no required weight bundle.
 Default resolved state:
 
 ```text
-/data/local-ai/services/comfyui/
+/data/services/local-ai/comfyui/
 ├── models/                 ComfyUI-managed/local models
 ├── input/                  input files
 ├── output/                 generated media
@@ -27,7 +27,7 @@ Default resolved state:
     ├── huggingface/        disposable cache
     └── torch/              disposable cache
 
-/data/hf-repos/             canonical shared model repositories, mounted RO
+/data/services/hf-repos/             canonical shared model repositories, mounted RO
 ```
 
 The UI defaults to `http://127.0.0.1:8188`.
@@ -49,7 +49,7 @@ COMFYUI_MODEL_BUNDLES=minimax-h3
 Then ordinary setup provisions the selected files into:
 
 ```text
-/data/hf-repos/Comfy-Org/MiniMax-H3/
+/data/services/hf-repos/Comfy-Org/MiniMax-H3/
 ```
 
 You can also request it for one setup run:

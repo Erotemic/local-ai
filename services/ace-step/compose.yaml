@@ -19,12 +19,12 @@ services:
       UV_CACHE_DIR: /state/uv-cache
       XDG_CACHE_HOME: /state/cache
     volumes:
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/models:/state/models:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/outputs:/opt/ACE-Step-1.5/gradio_outputs:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/huggingface:/state/huggingface:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/torch:/state/torch:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/uv-cache:/state/uv-cache:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/cache:/state/cache:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/models:/state/models:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/outputs:/opt/ACE-Step-1.5/gradio_outputs:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/huggingface:/state/huggingface:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/torch:/state/torch:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/uv-cache:/state/uv-cache:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/cache:/state/cache:rw
     command:
       - uv
       - run
@@ -67,12 +67,12 @@ services:
       UV_CACHE_DIR: /state/uv-cache
       XDG_CACHE_HOME: /state/cache
     volumes:
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/models:/state/models:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/outputs:/opt/ACE-Step-1.5/gradio_outputs:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/huggingface:/state/huggingface:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/torch:/state/torch:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/uv-cache:/state/uv-cache:rw
-      - ${ACESTEP_DATA_ROOT:-/data/local-ai/services/ace-step}/cache:/state/cache:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/models:/state/models:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/outputs:/opt/ACE-Step-1.5/gradio_outputs:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/huggingface:/state/huggingface:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/torch:/state/torch:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/uv-cache:/state/uv-cache:rw
+      - ${ACESTEP_DATA_ROOT:-/data/services/local-ai/ace-step}/cache:/state/cache:rw
     command:
       - uv
       - run

@@ -18,7 +18,7 @@ choosing a checkpoint location before local-ai configuration exists.
 Default resolved state:
 
 ```text
-/data/local-ai/services/ace-step/
+/data/services/local-ai/ace-step/
 ├── models/                 explicit ACE-Step checkpoints
 ├── outputs/                generated audio
 ├── huggingface/            disposable HF cache

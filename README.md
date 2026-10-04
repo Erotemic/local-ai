@@ -69,44 +69,43 @@ Large data never lives in Git. The machine-wide defaults are configured once in
 `local-ai/.env`:
 
 ```text
-/data/hf-repos/                 canonical explicitly downloaded model repos
-/data/local-ai/services/        private mutable service state
-/data/local-ai/workspaces/      intentionally shared project data
+/data/services/hf-repos/        canonical explicitly downloaded model repos
+/data/services/local-ai/         private mutable service state
+/data/services/local-ai/workspaces/ intentionally shared project data
 ```
 
 The default concrete service tree is:
 
 ```text
-/data/local-ai/
-├── services/
-│   ├── comfyui/
-│   │   ├── models/
-│   │   ├── input/
-│   │   ├── output/
-│   │   ├── user/
-│   │   ├── custom_nodes/
-│   │   └── cache/
-│   ├── ace-step/
-│   │   ├── models/
-│   │   ├── outputs/
-│   │   ├── huggingface/
-│   │   ├── torch/
-│   │   ├── uv-cache/
-│   │   └── cache/
-│   ├── triposplat/
-│   │   └── outputs/
-│   └── tts/
-│       ├── benchmarks/     # retained TTS benchmark audio + metadata
-│       └── wavhost/
-│           ├── .wavhost/   # content-addressed Wavhost models/voices
-│           └── cache/      # disposable HF/Torch/application cache
+/data/services/local-ai/
+├── comfyui/
+│   ├── models/
+│   ├── input/
+│   ├── output/
+│   ├── user/
+│   ├── custom_nodes/
+│   └── cache/
+├── ace-step/
+│   ├── models/
+│   ├── outputs/
+│   ├── huggingface/
+│   ├── torch/
+│   ├── uv-cache/
+│   └── cache/
+├── triposplat/
+│   └── outputs/
+├── tts/
+│   ├── benchmarks/     # retained TTS benchmark audio + metadata
+│   └── wavhost/
+│       ├── .wavhost/   # content-addressed Wavhost models/voices
+│       └── cache/      # disposable HF/Torch/application cache
 └── workspaces/
 ```
 
 Canonical externally downloaded model repositories stay separate:
 
 ```text
-/data/hf-repos/
+/data/services/hf-repos/
 ├── Comfy-Org/
 │   └── MiniMax-H3/          # optional ComfyUI bundle
 └── VAST-AI/

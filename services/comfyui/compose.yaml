@@ -31,12 +31,12 @@ services:
       - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${COMFYUI_PORT:-8188}:8188"
 
     volumes:
-      - ${COMFY_DATA_ROOT:-/data/local-ai/services/comfyui}/models:/opt/comfyui/models:rw
-      - ${COMFY_DATA_ROOT:-/data/local-ai/services/comfyui}/input:/opt/comfyui/input:rw
-      - ${COMFY_DATA_ROOT:-/data/local-ai/services/comfyui}/output:/opt/comfyui/output:rw
-      - ${COMFY_DATA_ROOT:-/data/local-ai/services/comfyui}/user:/opt/comfyui/user:rw
-      - ${COMFY_DATA_ROOT:-/data/local-ai/services/comfyui}/custom_nodes:/opt/comfyui/custom_nodes:rw
-      - ${COMFY_DATA_ROOT:-/data/local-ai/services/comfyui}/cache/huggingface:/home/comfyui-user/.cache/huggingface:rw
-      - ${COMFY_DATA_ROOT:-/data/local-ai/services/comfyui}/cache/torch:/home/comfyui-user/.cache/torch:rw
-      - ${HF_REPOS_ROOT:-/data/hf-repos}:/models/hf:ro
+      - ${COMFY_DATA_ROOT:-/data/services/local-ai/comfyui}/models:/opt/comfyui/models:rw
+      - ${COMFY_DATA_ROOT:-/data/services/local-ai/comfyui}/input:/opt/comfyui/input:rw
+      - ${COMFY_DATA_ROOT:-/data/services/local-ai/comfyui}/output:/opt/comfyui/output:rw
+      - ${COMFY_DATA_ROOT:-/data/services/local-ai/comfyui}/user:/opt/comfyui/user:rw
+      - ${COMFY_DATA_ROOT:-/data/services/local-ai/comfyui}/custom_nodes:/opt/comfyui/custom_nodes:rw
+      - ${COMFY_DATA_ROOT:-/data/services/local-ai/comfyui}/cache/huggingface:/home/comfyui-user/.cache/huggingface:rw
+      - ${COMFY_DATA_ROOT:-/data/services/local-ai/comfyui}/cache/torch:/home/comfyui-user/.cache/torch:rw
+      - ${HF_REPOS_ROOT:-/data/services/hf-repos}:/models/hf:ro
       - ./extra_model_paths.yaml:/opt/comfyui/extra_model_paths.yaml:ro

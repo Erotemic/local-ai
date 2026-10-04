@@ -17,8 +17,8 @@ required TripoSplat repository, verifies it, and then exits.
 Default resolved storage:
 
 ```text
-/data/hf-repos/VAST-AI/TripoSplat/       required canonical weights, read-only in container
-/data/local-ai/services/triposplat/      private service state
+/data/services/hf-repos/VAST-AI/TripoSplat/       required canonical weights, read-only in container
+/data/services/local-ai/triposplat/      private service state
 └── outputs/                             generated .ply/.splat assets
 ```
 
@@ -35,7 +35,7 @@ The UI defaults to `http://127.0.0.1:7861`.
 
 Service-specific choices include `TRIPOSPLAT_GPU`, `TRIPOSPLAT_PORT`, upstream
 revision/image settings, and an optional `TRIPOSPLAT_DATA_ROOT` override. Leave
-the data-root override blank to inherit `/data/local-ai/services/triposplat`.
+the data-root override blank to inherit `/data/services/local-ai/triposplat`.
 
 ## Weights
 
@@ -43,7 +43,7 @@ The required bundle is declared in `service.toml`:
 
 ```text
 source:       hf://VAST-AI/TripoSplat
-destination: /data/hf-repos/VAST-AI/TripoSplat
+destination: /data/services/hf-repos/VAST-AI/TripoSplat
 container:   /opt/TripoSplat/ckpts (read-only)
 ```
 
