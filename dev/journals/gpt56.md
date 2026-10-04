@@ -9,6 +9,12 @@ choice was made without repeating expensive downloads, builds, or GPU runs.
 Measurements here are observations, not promises. When a run was not controlled
 tightly enough to support a conclusion, that ambiguity is recorded explicitly.
 
+Structured TTS measurements are also maintained in `dev/benchmarks/tts_measurements.csv`
+(one row per benchmark run), with a compact canonical summary in
+`dev/benchmarks/tts.md`. The journal remains the place for chronology, failed
+paths, interpretation, and decisions; the benchmark ledger is the place to add
+future numeric observations so averages can be recomputed from raw rows.
+
 ## 2026-10-04 — Local TTS, Qwen3-TTS, Wavhost, and Pascal
 
 ### Goal
@@ -701,6 +707,46 @@ microcomparison, add a deterministic/greedy benchmark only if both runtimes can
 be configured equivalently, but preserve this default-sampling workload because
 it reflects actual intended use.
 
+#### RTX 3090 / qwentts.cpp / Q8_0, clamp disabled
+
+After hardening the launch path so one-shot environment overrides preserve the
+resolved model mount, the intended Ampere clamp comparison was completed with:
+
+```text
+TTS_QWENTTS_CLAMP_FP16=0
+NO_FA=0
+language=English
+physical GPU=0 (RTX 3090)
+```
+
+Retained artifact directory:
+
+```text
+/data/local-ai/services/tts/benchmarks/20261004T230316Z-qwentts-qwen-0.6-customvoice-q8-ggml-ryan
+```
+
+Raw timing data:
+
+| Run | Phase | Wall (s) | Audio (s) | RTF | Bytes |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | first | 3.403 | 21.680 | 0.157 | 1,040,684 |
+| 2 | repeat | 3.140 | 21.280 | 0.148 | 1,021,484 |
+| 3 | repeat | 2.752 | 18.560 | 0.148 | 890,924 |
+
+Mean repeat RTF: **0.148**, or about **6.76x real-time throughput**.
+
+Compared with the 3090 clamp-enabled repeat mean of 0.1655, this is about
+**10.6% lower RTF**. That is useful evidence that the Pascal-oriented clamp is
+unnecessary overhead on Ampere, but it is not a tightly controlled kernel
+microbenchmark: generation remained stochastic and the clamp-on run generated
+much longer utterances. Treat `CLAMP_FP16=0` as the preferred 3090 setting so
+far, while keeping the raw rows available for re-analysis.
+
+The structured raw rows for this and the earlier runs now live in
+`dev/benchmarks/tts_measurements.csv`; `dev/benchmarks/tts.md` is the compact
+summary. Future numeric runs should be appended there rather than growing this
+journal with another full table unless the chronology itself is important.
+
 #### Failed second 3090 attempt was a Compose configuration footgun, not a clamp result
 
 An attempted second 3090 run changed `TTS_QWENTTS_CLAMP_FP16` and then manually
@@ -784,13 +830,15 @@ runtime/model/kernel/configuration change justifies it:
 | Wavhost / PyTorch FP32 | RTX 3090 | 1.559 | 0.64x |
 | Wavhost / PyTorch FP32 | GTX 1080 Ti | 3.284 | 0.30x |
 | qwentts.cpp / GGUF Q8_0 / clamp=1 / FA on | RTX 3090 | 0.1655 | 6.04x |
+| qwentts.cpp / GGUF Q8_0 / clamp=0 / FA on | RTX 3090 | 0.1480 | 6.76x |
 | qwentts.cpp / GGUF Q8_0 / clamp=1 / FA on | GTX 1080 Ti | 0.244 | 4.10x |
 
-The highest-value immediate remaining comparison is the intended 3090
-`CLAMP_FP16=0` run using the hardened launch path. Q4 is no longer required to
-meet a real-time performance threshold; only investigate lower-bit variants if
-there is a separate memory/throughput objective and retained audio confirms the
-quality tradeoff is acceptable.
+The 3090 clamp-off comparison is now complete. Q4 is no longer required to meet
+a real-time performance threshold; only investigate lower-bit variants if there
+is a separate memory/throughput objective and retained audio confirms the quality
+tradeoff is acceptable. The next useful measurements should answer a new
+question (for example native Wavhost Kokoro versus the existing accelerated
+Kokoro service), rather than repeating the established Qwen Q8 baselines.
 
 ### Wavhost upstream contribution status after hardware validation
 
