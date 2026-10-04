@@ -1,0 +1,3 @@
+[submodule "submodules/wavhost"]
+	path = submodules/wavhost
+	url = https://github.com/smitgol/wavhost.git

@@ -103,14 +103,38 @@ def render_template_with_existing(
     return "\n".join(rendered).rstrip() + "\n"
 
 
+def ensure_editor_waits(command: list[str]) -> list[str]:
+    """Add the foreground/wait flag for editors that detach by default."""
+    if not command:
+        return command
+
+    executable = Path(command[0]).name.lower()
+    args = command[1:]
+
+    if executable in {"gvim", "gvimdiff", "mvim", "mvimdiff"}:
+        if "-f" not in args and "--nofork" not in args:
+            return [command[0], "-f", *args]
+    elif executable in {"code", "code-insiders", "codium", "cursor", "subl", "sublime_text", "gedit"}:
+        if "--wait" not in args:
+            return [*command, "--wait"]
+    elif executable == "kate":
+        if "--block" not in args:
+            return [*command, "--block"]
+    elif executable in {"vim", "vimdiff"} and ("-g" in args or "--gui" in args):
+        if "-f" not in args and "--nofork" not in args:
+            return [command[0], "-f", *args]
+
+    return command
+
+
 def choose_editor() -> list[str]:
     value = os.environ.get("VISUAL") or os.environ.get("EDITOR")
     if value:
-        return shlex.split(value)
+        return ensure_editor_waits(shlex.split(value))
     for candidate in ("vim", "vi", "nano"):
         path = shutil.which(candidate)
         if path:
-            return [path]
+            return ensure_editor_waits([path])
     raise LocalAIError("No editor found. Set $VISUAL or $EDITOR.")
 
 

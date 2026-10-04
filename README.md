@@ -31,7 +31,8 @@ cd ~/code/local-ai/services/triposplat
 On first use, `setup.sh`:
 
 1. stages the shared `../../.env` configuration and opens it in `$VISUAL`,
-   `$EDITOR`, `vim`, `vi`, or `nano`;
+   `$EDITOR`, `vim`, `vi`, or `nano`, waiting for the editor to close before
+   accepting the staged configuration;
 2. does the same for the service-specific `.env`;
 3. validates both files and atomically installs them with mode `0600`;
 4. resolves and prints the exact host paths, model destinations, port, and GPU;
