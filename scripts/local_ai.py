@@ -488,9 +488,12 @@ def download_huggingface(model: dict[str, Any], service_dir: Path, env: dict[str
         str(destination),
     ]
     include = [str(x) for x in model.get("include", [])]
-    if include:
-        args.append("--include")
-        args.extend(include)
+    for pattern in include:
+        # ``hf download --include`` accepts one pattern per option. Passing
+        # multiple patterns after a single --include causes later values to be
+        # parsed as positional filenames; the CLI then ignores --include and
+        # may download only the last file. Repeat the option for each pattern.
+        args.extend(["--include", pattern])
     download_env = dict(env)
     download_env["HF_XET_HIGH_PERFORMANCE"] = "1"
     run_command(args, cwd=service_dir, env=download_env)

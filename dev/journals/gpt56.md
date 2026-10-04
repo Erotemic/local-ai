@@ -572,3 +572,24 @@ Record the resulting `results.tsv`, generated WAVs, image identity, and whether
 `NO_FA` had to be changed before drawing conclusions. The principal threshold
 is whether Q8_0 gets below RTF 1.0; the prior 1080 Ti FP32 repeat baseline is
 RTF 3.284.
+
+### Provisioning note: multiple Hugging Face include patterns
+
+The first Q8 provisioning attempt exposed a generic bug in `scripts/local_ai.py`:
+for a manifest with two `include` entries it emitted one `--include` followed by
+both values. The `hf download` CLI accepts one pattern per `--include`, so the
+second GGUF was parsed as a positional filename. The CLI warned that `--include`
+was being ignored and downloaded only the tokenizer, leaving the talker missing.
+
+Observed partial result:
+
+```text
+Downloaded: qwen-tokenizer-12hz-Q8_0.gguf (~291 MB)
+Missing:    qwen-talker-0.6b-customvoice-Q8_0.gguf
+```
+
+The generic downloader now repeats `--include` once per manifest pattern. This
+also protects other multi-file Hugging Face bundles (for example MiniMax H3)
+from the same parsing bug. Re-running provisioning is incremental because
+`--local-dir` metadata and already-present files are reused.
+
