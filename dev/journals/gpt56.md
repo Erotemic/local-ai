@@ -593,3 +593,24 @@ also protects other multi-file Hugging Face bundles (for example MiniMax H3)
 from the same parsing bug. Re-running provisioning is incremental because
 `--local-dir` metadata and already-present files are reused.
 
+
+### 2026-10-04: first qwentts.cpp Q8 startup attempt exposed a readiness race
+
+After fixing multi-file Hugging Face provisioning, both Q8_0 files were present on the GTX 1080 Ti host:
+
+- `qwen-talker-0.6b-customvoice-Q8_0.gguf`: 924 MiB as reported by `ls -lh`.
+- `qwen-tokenizer-12hz-Q8_0.gguf`: 278 MiB as reported by `ls -lh`.
+
+The first `./start-qwentts.sh` invocation pulled `ghcr.io/serveurpersocom/qwentts.cpp:cuda12` and returned immediately after Docker reported the container started. An external `/health` request made immediately afterward failed with curl exit 56 (`Recv failure: Connection reset by peer`), and an immediately-following benchmark failed the same way. The benchmark harness then attempted to rename a WAV that curl had never created, producing a secondary `mv: cannot stat ... run-01.wav` error.
+
+Do **not** interpret this attempt as a qwentts inference failure yet. The start helper did not wait for model/CUDA initialization or health before returning, so the requests may simply have raced startup. Upstream's CUDA-12 image documents Pascal `sm_61` support, and upstream issue #35 includes a GTX 1080 Ti log reaching `[Server] listening on 0.0.0.0:8080` with the same CUDA image family, so Pascal support is independently evidenced:
+
+- https://github.com/ServeurpersoCom/qwentts.cpp/blob/master/docs/DOCKER.md
+- https://github.com/ServeurpersoCom/qwentts.cpp/issues/35
+
+Follow-up harness changes:
+
+- `start-qwentts.sh` now waits for `/health`, detects an exited/restarting container, and emits the tail of qwentts logs on failure.
+- `benchmark.sh` refuses to benchmark an unhealthy Wavhost/qwentts server and records curl transport failures without assuming an output WAV exists. It saves a container-log snapshot beside failed benchmark artifacts.
+
+This preserves the first attempt as an infrastructure/readiness observation rather than contaminating the Q8 performance baseline with a startup race.

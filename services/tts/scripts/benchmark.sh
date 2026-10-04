@@ -116,7 +116,7 @@ print(json.dumps({
     "cache_state": "not reset by benchmark.sh",
 }, indent=2, sort_keys=True))
 PY
-printf 'run\tphase\thttp_code\telapsed_s\taudio_s\trtf\tbytes\tfile\n' > "$run_dir/results.tsv"
+printf 'run\tphase\tcurl_exit\thttp_code\telapsed_s\taudio_s\trtf\tbytes\tfile\n' > "$run_dir/results.tsv"
 printf '%s\n' "$text" > "$run_dir/input.txt"
 printf '%s\n' "$payload" > "$run_dir/request.json"
 
@@ -124,24 +124,88 @@ echo "backend=$backend url=$base_url model=$model voice=$voice runs=$runs dtype=
 echo "artifacts=$run_dir"
 echo "note=benchmark.sh does not reset the server/model cache; phase=first means first request in this invocation, not necessarily a cold model load"
 
+if [[ "$backend" == "qwentts" || "$backend" == "wavhost" ]]; then
+  if ! curl -fsS --max-time 3 "$base_url/health" >/dev/null 2>&1; then
+    echo "ERROR: $backend is not healthy at $base_url/health; refusing to start a benchmark." >&2
+    if command -v docker >/dev/null 2>&1; then
+      docker ps -a --filter "name=^/${runtime_container}$" >&2 || true
+      echo "--- ${runtime_container} logs ---" >&2
+      docker logs --tail=200 "$runtime_container" >&2 2>/dev/null || true
+    fi
+    exit 1
+  fi
+fi
+
 for ((i = 1; i <= runs; i++)); do
   out="$run_dir/run-$(printf '%02d' "$i").wav"
-  read -r http_code elapsed < <(
+  curl_stderr="$run_dir/run-$(printf '%02d' "$i").curl.stderr.txt"
+  phase="repeat"
+  [[ "$i" -eq 1 ]] && phase="first"
+
+  set +e
+  metrics="$(
     curl -sS \
+      --connect-timeout 5 \
       -o "$out" \
       -w '%{http_code} %{time_total}\n' \
       -H 'Content-Type: application/json' \
       -d "$payload" \
-      "$base_url/v1/audio/speech"
-  )
-  phase="repeat"
-  [[ "$i" -eq 1 ]] && phase="first"
+      "$base_url/v1/audio/speech" \
+      2>"$curl_stderr"
+  )"
+  curl_exit=$?
+  set -e
+
+  http_code="000"
+  elapsed="0"
+  if [[ -n "$metrics" ]]; then
+    read -r http_code elapsed <<< "$metrics"
+  fi
+
+  if [[ "$curl_exit" -ne 0 ]]; then
+    error_out="${out%.wav}.error.txt"
+    {
+      echo "curl_exit=$curl_exit"
+      echo "http_code=$http_code"
+      echo "elapsed_s=$elapsed"
+      cat "$curl_stderr"
+    } > "$error_out"
+    rm -f "$curl_stderr"
+    partial=""
+    bytes=0
+    if [[ -f "$out" ]]; then
+      bytes="$(wc -c < "$out")"
+      if [[ "$bytes" -gt 0 ]]; then
+        partial="${out%.wav}.partial.wav"
+        mv "$out" "$partial"
+      else
+        rm -f "$out"
+      fi
+    fi
+    if command -v docker >/dev/null 2>&1; then
+      docker logs --tail=200 "$runtime_container" > "$run_dir/run-$(printf '%02d' "$i").container.log" 2>&1 || true
+    fi
+    printf '%d\t%s\t%d\t%s\t%s\t\t\t%s\t%s\n' \
+      "$i" "$phase" "$curl_exit" "$http_code" "$elapsed" "$bytes" "${partial:-$error_out}" \
+      >> "$run_dir/results.tsv"
+    echo "run=$i phase=$phase curl_exit=$curl_exit HTTP=$http_code elapsed=${elapsed}s" >&2
+    echo "error=$error_out" >&2
+    [[ -n "$partial" ]] && echo "partial_audio=$partial" >&2
+    cat "$error_out" >&2
+    exit 1
+  fi
+  rm -f "$curl_stderr"
 
   if [[ "$http_code" != "200" ]]; then
     error_out="${out%.wav}.error.txt"
-    mv "$out" "$error_out"
-    printf '%d\t%s\t%s\t%s\t\t\t%s\t%s\n' \
-      "$i" "$phase" "$http_code" "$elapsed" "$(wc -c < "$error_out")" "$error_out" \
+    if [[ -f "$out" ]]; then
+      mv "$out" "$error_out"
+    else
+      printf 'HTTP %s with no response body\n' "$http_code" > "$error_out"
+    fi
+    bytes="$(wc -c < "$error_out")"
+    printf '%d\t%s\t%d\t%s\t%s\t\t\t%s\t%s\n' \
+      "$i" "$phase" "$curl_exit" "$http_code" "$elapsed" "$bytes" "$error_out" \
       >> "$run_dir/results.tsv"
     echo "run=$i phase=$phase HTTP=$http_code elapsed=${elapsed}s response saved to $error_out" >&2
     cat "$error_out" >&2
@@ -157,14 +221,14 @@ for ((i = 1; i <= runs; i++)); do
     rtf="$(awk -v t="$elapsed" -v d="$duration" 'BEGIN { if (d > 0) printf "%.3f", t / d; else print "n/a" }')"
     printf 'run=%d phase=%s elapsed=%.3fs audio=%.3fs RTF=%s bytes=%s file=%s\n' \
       "$i" "$phase" "$elapsed" "$duration" "$rtf" "$bytes" "$out"
-    printf '%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$i" "$phase" "$http_code" "$elapsed" "$duration" "$rtf" "$bytes" "$out" \
+    printf '%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$i" "$phase" "$curl_exit" "$http_code" "$elapsed" "$duration" "$rtf" "$bytes" "$out" \
       >> "$run_dir/results.tsv"
   else
     printf 'run=%d phase=%s elapsed=%.3fs bytes=%s file=%s (install ffprobe for RTF)\n' \
       "$i" "$phase" "$elapsed" "$bytes" "$out"
-    printf '%d\t%s\t%s\t%s\t\t\t%s\t%s\n' \
-      "$i" "$phase" "$http_code" "$elapsed" "$bytes" "$out" \
+    printf '%d\t%s\t%d\t%s\t%s\t\t\t%s\t%s\n' \
+      "$i" "$phase" "$curl_exit" "$http_code" "$elapsed" "$bytes" "$out" \
       >> "$run_dir/results.tsv"
   fi
 done
