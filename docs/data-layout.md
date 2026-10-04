@@ -78,8 +78,13 @@ Concrete layout:
 │   ├── uv-cache/            # disposable cache
 │   └── cache/               # disposable application cache
 │
-└── triposplat/
-    └── outputs/             # generated .ply/.splat assets
+├── triposplat/
+│   └── outputs/             # generated .ply/.splat assets
+│
+└── tts/
+    └── wavhost/
+        ├── .wavhost/        # model blobs/manifests/checkpoints + saved voices
+        └── cache/           # disposable HF/Torch/application cache
 ```
 
 ACE-Step previously lived at `/data/service/docker/ace-step`. To reuse that
@@ -92,6 +97,13 @@ ACESTEP_DATA_ROOT=/data/service/docker/ace-step
 
 Other services can likewise override their `*_DATA_ROOT`, but leaving it blank
 uses the machine-wide `LOCAL_AI_SERVICE_ROOT` convention.
+
+Wavhost model storage is service-owned rather than placed in `HF_REPOS_ROOT`:
+Wavhost intentionally maintains its own content-addressed blob/manifests layout
+and materialized checkpoints. Model weights are reconstructible, while saved
+voice reference audio under the same Wavhost home should be treated as user
+data if voice cloning is used. The separate Kokoro-FastAPI baseline does not
+need a host data volume for ordinary API synthesis.
 
 ## Workspaces
 

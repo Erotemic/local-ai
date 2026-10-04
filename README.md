@@ -14,9 +14,15 @@ helper makes first-run configuration and persistent storage explicit.
 | `comfyui` | General ComfyUI installation; model bundles are optional | `http://127.0.0.1:8188` |
 | `ace-step` | ACE-Step music/audio generation | `http://127.0.0.1:7860` |
 | `triposplat` | Single-image 3D Gaussian reconstruction | `http://127.0.0.1:7861` |
+| `tts` | Local TTS: Wavhost/Qwen experiment + Kokoro GPU baseline | `http://127.0.0.1:11435` |
 
 `infer-stack` is intentionally not included yet. It can become another service
 later without changing this repository's role.
+
+The `tts` service builds Wavhost from `submodules/wavhost`, so local fork fixes
+can be tested in the same reproducible service recipe before being contributed
+upstream. It keeps the existing Kokoro-FastAPI GPU image available separately
+for performance and quality comparisons.
 
 ## Normal workflow
 
@@ -87,8 +93,12 @@ The default concrete service tree is:
 │   │   ├── torch/
 │   │   ├── uv-cache/
 │   │   └── cache/
-│   └── triposplat/
-│       └── outputs/
+│   ├── triposplat/
+│   │   └── outputs/
+│   └── tts/
+│       └── wavhost/
+│           ├── .wavhost/   # content-addressed Wavhost models/voices
+│           └── cache/      # disposable HF/Torch/application cache
 └── workspaces/
 ```
 

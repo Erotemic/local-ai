@@ -1,0 +1,65 @@
+services:
+  wavhost:
+    build:
+      context: ../..
+      dockerfile: services/tts/Dockerfile
+      args:
+        TORCH_VERSION: ${TTS_TORCH_VERSION:-2.14.0}
+        TORCHAUDIO_VERSION: ${TTS_TORCHAUDIO_VERSION:-2.11.0}
+        TORCH_CUDA_TAG: ${TTS_TORCH_CUDA_TAG:-cu126}
+        QWEN_TTS_VERSION: ${TTS_QWEN_TTS_VERSION:-0.1.1}
+    image: ${TTS_WAVHOST_IMAGE:-local/wavhost:pascal}
+    container_name: ai-voice-wavhost
+    restart: unless-stopped
+    ports:
+      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_WAVHOST_PORT:-11435}:11435"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      HOME: /state
+      HF_HOME: /state/cache/huggingface
+      TORCH_HOME: /state/cache/torch
+      XDG_CACHE_HOME: /state/cache
+      WAVHOST_QWEN_DTYPE: ${WAVHOST_QWEN_DTYPE:-auto}
+      WAVHOST_BACKEND_CACHE_SIZE: ${WAVHOST_BACKEND_CACHE_SIZE:-1}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${TTS_DATA_ROOT:-/data/local-ai/services/tts}/wavhost:/state:rw
+    command:
+      - wavhost
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - "11435"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:11435/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_WAVHOST_GPU:-1}"]
+              capabilities: ["gpu"]
+
+  kokoro:
+    image: ${TTS_KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.3.0-amd64}
+    container_name: ai-voice-kokoro
+    restart: unless-stopped
+    ports:
+      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_KOKORO_PORT:-8880}:8880"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      PYTHONUNBUFFERED: "1"
+      API_LOG_LEVEL: INFO
+      TZ: ${TZ:-Etc/UTC}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_KOKORO_GPU:-0}"]
+              capabilities: ["gpu"]

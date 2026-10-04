@@ -1,0 +1,117 @@
+[service]
+name = "tts"
+display_name = "Local TTS"
+description = "Wavhost/Qwen TTS experiment with the accelerated Kokoro server retained as a baseline."
+compose_service = "wavhost"
+compose_build_target = "wavhost"
+bind_var = "LOCAL_AI_BIND_ADDRESS"
+port_var = "TTS_WAVHOST_PORT"
+gpu_var = "TTS_WAVHOST_GPU"
+
+[config]
+required = [
+  "LOCAL_AI_SERVICE_ROOT",
+  "LOCAL_AI_BIND_ADDRESS",
+  "TTS_DATA_ROOT",
+  "TTS_WAVHOST_MODELS",
+  "TTS_WAVHOST_PORT",
+  "TTS_WAVHOST_GPU",
+  "TTS_WAVHOST_IMAGE",
+  "WAVHOST_QWEN_DTYPE",
+  "WAVHOST_BACKEND_CACHE_SIZE",
+  "TTS_TORCH_VERSION",
+  "TTS_TORCHAUDIO_VERSION",
+  "TTS_TORCH_CUDA_TAG",
+  "TTS_QWEN_TTS_VERSION",
+  "TTS_KOKORO_PORT",
+  "TTS_KOKORO_GPU",
+  "TTS_KOKORO_IMAGE",
+  "TTS_BENCH_QWEN_MODEL",
+  "TTS_BENCH_QWEN_VOICE",
+  "TTS_BENCH_KOKORO_MODEL",
+  "TTS_BENCH_KOKORO_VOICE",
+]
+
+[defaults]
+TTS_DATA_ROOT = "{LOCAL_AI_SERVICE_ROOT}/tts"
+
+[model_selection]
+env = "TTS_WAVHOST_MODELS"
+
+[[directories]]
+label = "TTS service state"
+path = "{TTS_DATA_ROOT}"
+role = "Private mutable state for local TTS runtimes"
+retention = "service-owned"
+
+[[directories]]
+label = "Wavhost home"
+path = "{TTS_DATA_ROOT}/wavhost"
+role = "Wavhost content-addressed models, manifests, voices, and cache"
+retention = "models reconstructible; saved voices may be user data"
+
+[[directories]]
+label = "Wavhost cache"
+path = "{TTS_DATA_ROOT}/wavhost/cache"
+role = "Hugging Face, Torch, and application caches"
+retention = "disposable"
+
+[[models]]
+name = "qwen-0.6-customvoice"
+label = "Qwen3-TTS 0.6B CustomVoice"
+required = false
+source = "compose-command"
+source_label = "Wavhost registry / Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/qwen/qwen-0.6-customvoice"
+container_path = "/state/.wavhost/models/checkpoints/qwen/qwen-0.6-customvoice/latest"
+compose_service = "wavhost"
+command = ["wavhost", "pull", "qwen-0.6-customvoice", "--skip-deps"]
+check_files = ["latest"]
+
+[[models]]
+name = "qwen-1.7-customvoice"
+label = "Qwen3-TTS 1.7B CustomVoice"
+required = false
+source = "compose-command"
+source_label = "Wavhost registry / Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/qwen/qwen-1.7-customvoice"
+container_path = "/state/.wavhost/models/checkpoints/qwen/qwen-1.7-customvoice/latest"
+compose_service = "wavhost"
+command = ["wavhost", "pull", "qwen-1.7-customvoice", "--skip-deps"]
+check_files = ["latest"]
+
+[[models]]
+name = "qwen-0.6-base"
+label = "Qwen3-TTS 0.6B Base (voice cloning)"
+required = false
+source = "compose-command"
+source_label = "Wavhost registry / Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/qwen/qwen-0.6-base"
+container_path = "/state/.wavhost/models/checkpoints/qwen/qwen-0.6-base/latest"
+compose_service = "wavhost"
+command = ["wavhost", "pull", "qwen-0.6-base", "--skip-deps"]
+check_files = ["latest"]
+
+[[models]]
+name = "qwen-1.7-base"
+label = "Qwen3-TTS 1.7B Base (voice cloning)"
+required = false
+source = "compose-command"
+source_label = "Wavhost registry / Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/qwen/qwen-1.7-base"
+container_path = "/state/.wavhost/models/checkpoints/qwen/qwen-1.7-base/latest"
+compose_service = "wavhost"
+command = ["wavhost", "pull", "qwen-1.7-base", "--skip-deps"]
+check_files = ["latest"]
+
+[[models]]
+name = "kokoro"
+label = "Kokoro 82M via Wavhost"
+required = false
+source = "compose-command"
+source_label = "Wavhost registry / hexgrad/Kokoro-82M"
+destination = "{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/kokoro/kokoro"
+container_path = "/state/.wavhost/models/checkpoints/kokoro/kokoro/latest"
+compose_service = "wavhost"
+command = ["wavhost", "pull", "kokoro", "--skip-deps"]
+check_files = ["latest"]

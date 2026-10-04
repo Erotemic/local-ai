@@ -1,0 +1,15 @@
+.git
+**/.git
+.env
+**/.env
+.env.staging-*
+**/.env.staging-*
+.cache/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+*.log
+*.tmp
+.vscode/
+.idea/
+.DS_Store
