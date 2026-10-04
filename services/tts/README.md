@@ -260,13 +260,22 @@ without a material runtime/code change. The next experiment uses qwentts.cpp as
 a genuinely quantized runtime rather than loading compressed weights and
 expanding them back to FP32 before generation.
 
-The experimental service is deliberately separate from Wavhost:
+The quantized runtime remains separate from Wavhost. For operational Android
+use, local-ai now puts a small client gateway in front of qwentts.cpp:
 
 ```text
 Wavhost / official PyTorch       http://127.0.0.1:11435
-qwentts.cpp / Q8_0 GGUF          http://127.0.0.1:11436
-Kokoro-FastAPI baseline          http://127.0.0.1:8880
+qwentts.cpp raw engine            http://127.0.0.1:11436
+qwentts client gateway            http://127.0.0.1:11437
+Kokoro-FastAPI baseline           http://127.0.0.1:8880
 ```
+
+The raw qwentts server only emits WAV or PCM. The gateway preserves qwentts.cpp
+inference, accepts the same OpenAI-compatible request shape, and adds `mp3` by
+transcoding the returned WAV with ffmpeg. It also retries transient upstream 5xx
+failures and implausibly short WAV results. This is intentionally a deployment
+shim rather than a second inference implementation; a future Wavhost qwentts
+backend can replace it without changing the Android-facing API.
 
 qwentts.cpp's upstream `cuda12` image is documented as containing CUDA device
 code from Pascal `sm_61` through newer architectures. Do not use its `cuda13`
@@ -300,6 +309,12 @@ on GPU 0, but stop Wavhost before starting the quantized server:
 ./start-qwentts.sh
 ./scripts/benchmark.sh qwentts 3
 ```
+
+`./start-qwentts.sh` starts both the raw qwentts engine and the lightweight
+client gateway. Benchmarks still request WAV through the gateway so the timing
+remains dominated by qwentts inference; Android should use port `11437` and
+`response_format=mp3`. The default MP3 bitrate is 64 kbps, which reduces a
+24 kHz mono lecture from roughly 2.9 MB/minute as WAV to about 0.48 MB/minute.
 
 Use `./compose.sh`, not a bare `docker compose`, for direct lifecycle commands.
 The wrapper always supplies both the machine-wide `../../.env` and service-local

@@ -46,6 +46,9 @@ for other in qwentts wavhost kokoro; do
     "$SERVICE_DIR/compose.sh" stop "$other" >/dev/null 2>&1 || true
   fi
 done
+if [[ "$backend" != "qwentts" ]]; then
+  "$SERVICE_DIR/compose.sh" stop qwentts-gateway >/dev/null 2>&1 || true
+fi
 
 echo "Starting active TTS backend: $backend"
 case "$backend" in

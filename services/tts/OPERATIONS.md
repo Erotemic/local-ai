@@ -27,16 +27,24 @@ Then start the configured backend exclusively:
 ./status.sh
 ```
 
-`./start.sh` stops the other TTS containers before starting qwentts. The normal
-Q8 endpoint is port `11436`; `./status.sh` prints the local URL and a best-effort
-LAN URL and queries `/health` and `/v1/models`.
+`./start.sh` stops the other TTS containers before starting qwentts. The raw Q8 engine remains on port `11436`. Normal Android clients should use
+the local-ai gateway on port `11437`; `./status.sh` reports that client URL and
+queries `/health` and `/v1/models` through the gateway.
 
-The Android reader should use the LAN URL, not `127.0.0.1`. The model advertised
-by qwentts is normally:
+The Android reader should use the gateway LAN URL, not `127.0.0.1`. For the
+default deployment configure it with:
 
 ```text
-qwen-0.6-customvoice-q8-ggml
+server: http://<server-lan-ip>:11437
+model:  qwen-0.6-customvoice-q8-ggml
+voice:  ryan
+format: mp3
 ```
+
+The gateway proxies discovery endpoints from qwentts, converts qwentts WAV to
+64 kbps MP3 by default, and retries transient 5xx/empty-or-near-empty generation
+results up to `TTS_QWENTTS_GATEWAY_RETRIES` times. The raw engine on `11436` is
+still available for debugging and benchmark comparison.
 
 The endpoint is unauthenticated HTTP. Bind to `0.0.0.0` only on a trusted LAN,
 and restrict the port with the host firewall if the machine has untrusted
@@ -71,9 +79,10 @@ TTS_ACTIVE_BACKEND=kokoro ./start.sh
 Ports remain backend-specific so side-by-side benchmark runs are still possible:
 
 ```text
-qwentts.cpp Q8         11436
-Wavhost                11435
-Kokoro-FastAPI          8880
+qwentts.cpp raw Q8      11436
+qwentts MP3 gateway     11437
+Wavhost                 11435
+Kokoro-FastAPI           8880
 ```
 
 A stable public port or remote control plane can be added later if the Android

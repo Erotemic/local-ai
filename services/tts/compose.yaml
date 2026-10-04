@@ -46,6 +46,8 @@ services:
               device_ids: ["${TTS_WAVHOST_GPU:-1}"]
               capabilities: ["gpu"]
 
+  # Raw quantized inference engine. Keep this endpoint available for direct
+  # benchmark/debug use; normal Android clients use qwentts-gateway below.
   qwentts:
     image: ${TTS_QWENTTS_IMAGE:-ghcr.io/serveurpersocom/qwentts.cpp:cuda12}
     container_name: ai-voice-qwentts
@@ -77,6 +79,37 @@ services:
             - driver: nvidia
               device_ids: ["${TTS_QWENTTS_GPU:-1}"]
               capabilities: ["gpu"]
+
+
+  # Client-facing deployment shim: discovery proxy + bounded qwentts retries +
+  # WAV->MP3 conversion. It reuses the already-built Wavhost image for Python
+  # and ffmpeg, but does not invoke Wavhost inference.
+  qwentts-gateway:
+    image: ${TTS_WAVHOST_IMAGE:-local/wavhost:pascal}
+    container_name: ai-voice-qwentts-gateway
+    restart: unless-stopped
+    depends_on:
+      qwentts:
+        condition: service_healthy
+    ports:
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_QWENTTS_GATEWAY_PORT:-11437}:11437"
+    environment:
+      QWENTTS_UPSTREAM_URL: http://qwentts:8080
+      QWENTTS_GATEWAY_HOST: 0.0.0.0
+      QWENTTS_GATEWAY_PORT: "11437"
+      QWENTTS_GATEWAY_RETRIES: ${TTS_QWENTTS_GATEWAY_RETRIES:-2}
+      QWENTTS_MP3_BITRATE_KBPS: ${TTS_QWENTTS_MP3_BITRATE_KBPS:-64}
+      QWENTTS_GATEWAY_UPSTREAM_TIMEOUT: "240"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./scripts/qwentts_gateway.py:/opt/local-ai/qwentts_gateway.py:ro
+    command: ["python", "/opt/local-ai/qwentts_gateway.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:11437/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   kokoro:
     image: ${TTS_KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.3.0-amd64}

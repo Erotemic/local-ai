@@ -1,7 +1,7 @@
 [service]
 name = "tts"
 display_name = "Local TTS"
-description = "Local OpenAI-compatible TTS with qwentts.cpp, Wavhost, and Kokoro backends."
+description = "Local OpenAI-compatible TTS with qwentts.cpp, MP3 gateway, Wavhost, and Kokoro backends."
 compose_service = "wavhost"
 compose_build_target = "wavhost"
 bind_var = "TTS_BIND_ADDRESS"
@@ -37,6 +37,9 @@ required = [
   "TTS_QWENTTS_CLAMP_FP16",
   "TTS_QWENTTS_NO_FA",
   "TTS_QWENTTS_START_TIMEOUT",
+  "TTS_QWENTTS_GATEWAY_PORT",
+  "TTS_QWENTTS_GATEWAY_RETRIES",
+  "TTS_QWENTTS_MP3_BITRATE_KBPS",
   "TTS_KOKORO_PORT",
   "TTS_KOKORO_GPU",
   "TTS_KOKORO_IMAGE",

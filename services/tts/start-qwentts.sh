@@ -23,6 +23,9 @@ qwentts_override_keys=(
   TTS_QWENTTS_CLAMP_FP16
   TTS_QWENTTS_NO_FA
   TTS_QWENTTS_START_TIMEOUT
+  TTS_QWENTTS_GATEWAY_PORT
+  TTS_QWENTTS_GATEWAY_RETRIES
+  TTS_QWENTTS_MP3_BITRATE_KBPS
 )
 declare -A inherited_overrides=()
 for key in "${qwentts_override_keys[@]}"; do
@@ -84,49 +87,68 @@ echo "  codec=$model_root/$codec_file"
 echo "  language=${TTS_QWENTTS_LANGUAGE:-English}"
 echo "  clamp_fp16=${TTS_QWENTTS_CLAMP_FP16:-1}"
 echo "  no_fa=${TTS_QWENTTS_NO_FA:-0}"
+echo "  gateway_port=${TTS_QWENTTS_GATEWAY_PORT:-11437}"
+echo "  gateway_retries=${TTS_QWENTTS_GATEWAY_RETRIES:-2}"
+echo "  gateway_mp3_bitrate=${TTS_QWENTTS_MP3_BITRATE_KBPS:-64}k"
 
 uv run "$ROOT_DIR/scripts/local_ai.py" model check qwen-0.6-customvoice-q8-gguf --service-dir "$SERVICE_DIR"
 
 "$SERVICE_DIR/compose.sh" config --quiet
 "$SERVICE_DIR/compose.sh" pull qwentts
-"$SERVICE_DIR/compose.sh" up -d --no-build --pull never qwentts
+"$SERVICE_DIR/compose.sh" up -d --no-build --pull never qwentts qwentts-gateway
 
-container="ai-voice-qwentts"
+engine_container="ai-voice-qwentts"
+gateway_container="ai-voice-qwentts-gateway"
 health_host="$bind_address"
 case "$health_host" in
   0.0.0.0|::|"[::]") health_host="127.0.0.1" ;;
 esac
-health_url="http://${health_host}:${port}/health"
+gateway_port="${TTS_QWENTTS_GATEWAY_PORT:-11437}"
+health_url="http://${health_host}:${gateway_port}/health"
 
-echo "Waiting for qwentts to become ready: $health_url (timeout ${timeout_s}s)"
+echo "Waiting for qwentts gateway to become ready: $health_url (timeout ${timeout_s}s)"
 deadline=$((SECONDS + timeout_s))
 while (( SECONDS < deadline )); do
   if curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then
-    echo "qwentts ready: http://${health_host}:${port}"
+    echo "qwentts engine ready: http://${health_host}:${port}"
+    echo "qwentts client gateway ready: http://${health_host}:${gateway_port}"
     if [[ "$bind_address" == "0.0.0.0" || "$bind_address" == "::" || "$bind_address" == "[::]" ]]; then
-      echo "LAN clients may connect to http://<server-lan-ip>:${port}"
+      echo "LAN clients should use http://<server-lan-ip>:${gateway_port} (MP3 + retries)"
     else
-      echo "client endpoint: http://${bind_address}:${port}"
+      echo "client endpoint: http://${bind_address}:${gateway_port}"
     fi
     exit 0
   fi
 
-  state="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)"
-  case "$state" in
+  engine_state="$(docker inspect --format '{{.State.Status}}' "$engine_container" 2>/dev/null || true)"
+  gateway_state="$(docker inspect --format '{{.State.Status}}' "$gateway_container" 2>/dev/null || true)"
+  case "$engine_state" in
     running) ;;
-    created|restarting|exited|dead|removing|paused|"")
-      echo "ERROR: qwentts did not remain running while starting (state=${state:-missing})." >&2
-      "$SERVICE_DIR/compose.sh" ps -a qwentts >&2 || true
+    *)
+      echo "ERROR: qwentts engine did not remain running (state=${engine_state:-missing})." >&2
+      "$SERVICE_DIR/compose.sh" ps -a qwentts qwentts-gateway >&2 || true
       echo "--- qwentts logs ---" >&2
       "$SERVICE_DIR/compose.sh" logs --tail=200 qwentts >&2 || true
+      exit 1
+      ;;
+  esac
+  case "$gateway_state" in
+    running|created) ;;
+    *)
+      echo "ERROR: qwentts gateway did not remain runnable (state=${gateway_state:-missing})." >&2
+      "$SERVICE_DIR/compose.sh" ps -a qwentts qwentts-gateway >&2 || true
+      echo "--- qwentts gateway logs ---" >&2
+      "$SERVICE_DIR/compose.sh" logs --tail=200 qwentts-gateway >&2 || true
       exit 1
       ;;
   esac
   sleep 2
 done
 
-echo "ERROR: qwentts did not become healthy within ${timeout_s}s." >&2
-"$SERVICE_DIR/compose.sh" ps -a qwentts >&2 || true
+echo "ERROR: qwentts gateway did not become healthy within ${timeout_s}s." >&2
+"$SERVICE_DIR/compose.sh" ps -a qwentts qwentts-gateway >&2 || true
 echo "--- qwentts logs ---" >&2
 "$SERVICE_DIR/compose.sh" logs --tail=200 qwentts >&2 || true
+echo "--- qwentts gateway logs ---" >&2
+"$SERVICE_DIR/compose.sh" logs --tail=200 qwentts-gateway >&2 || true
 exit 1

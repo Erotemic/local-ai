@@ -924,3 +924,49 @@ and `git diff --check` also passed. A fake-Docker exercise of
 resolved `TTS_DATA_ROOT=/data/services/local-ai/tts/tts` and preserved a caller
 `TTS_QWENTTS_CLAMP_FP16=0` override, confirming that direct lifecycle operations
 now agree with setup while retaining experiment overrides.
+
+
+
+### 2026-10-04 — qwentts Android gateway for MP3 transport and transient retry
+
+The validated fast GTX 1080 Ti path is qwentts.cpp Q8_0 directly, not Wavhost.
+The Wavhost submodule at `6a479e3` still has only its PyTorch Qwen backend; no
+qwentts/GGUF integration is present. Direct qwentts generation measured about
+0.244 repeat RTF on the GTX 1080 Ti, but qwentts only exposes WAV/PCM. A 24 kHz
+mono 16-bit WAV is about 48 kB/s (~2.9 MB/min), which is undesirable for long
+Android lectures over a weak LAN link.
+
+A real repeated Android preflight also observed intermittent qwentts synthesis
+failure after one successful request:
+
+```text
+HTTP 502
+tts_slot_complete: codec decode returned no audio
+```
+
+A previous request had also returned a syntactically valid but implausibly short
+0.16 s WAV for a full sentence. These are inference/runtime reliability failures,
+not server-start or network failures.
+
+For immediate operational use, local-ai now runs `qwentts-gateway` alongside the
+raw qwentts container. It is a small stdlib Python HTTP shim running in the
+already-built Wavhost image (which provides ffmpeg) and does not perform
+inference itself. The raw qwentts engine stays on port 11436. The gateway uses
+port 11437 and:
+
+- proxies `/health`, `/v1/models`, and voice discovery;
+- forwards `/v1/audio/speech` to qwentts as buffered WAV;
+- returns WAV unchanged when requested;
+- transcodes WAV to 64 kbps MP3 when requested;
+- retries transport/5xx failures;
+- retries a valid WAV when its duration is implausibly short for the input text.
+
+This is a tactical deployment shim. A future Wavhost qwentts backend can absorb
+these responsibilities without changing the Android-facing API. Android should
+use `http://<server>:11437`, model `qwen-0.6-customvoice-q8-ggml`, voice `ryan`,
+and `response_format=mp3`.
+
+Gateway logic was exercised against a mock qwentts server with the sequence
+`502 -> 0.10 s WAV -> 2.00 s WAV`. With two retries configured, the gateway
+rejected both bad attempts, transcoded the third result with ffmpeg, and returned
+a valid 24 kHz mono ~64 kbps MP3.
