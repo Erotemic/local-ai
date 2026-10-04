@@ -26,6 +26,17 @@ case "$backend" in
     voice="${TTS_BENCH_QWEN_VOICE:-Ryan}"
     gpu="${TTS_WAVHOST_GPU:-}"
     dtype="${WAVHOST_QWEN_DTYPE:-auto}"
+    runtime_image="${TTS_WAVHOST_IMAGE:-local/wavhost:pascal}"
+    runtime_container="ai-voice-wavhost"
+    ;;
+  qwentts)
+    base_url="http://${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_QWENTTS_PORT:-11436}"
+    model="${TTS_BENCH_QWENTTS_MODEL:-qwen-0.6-customvoice-q8-ggml}"
+    voice="${TTS_BENCH_QWENTTS_VOICE:-ryan}"
+    gpu="${TTS_QWENTTS_GPU:-}"
+    dtype="Q8_0"
+    runtime_image="${TTS_QWENTTS_IMAGE:-ghcr.io/serveurpersocom/qwentts.cpp:cuda12}"
+    runtime_container="ai-voice-qwentts"
     ;;
   kokoro)
     base_url="http://${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_KOKORO_PORT:-8880}"
@@ -33,9 +44,11 @@ case "$backend" in
     voice="${TTS_BENCH_KOKORO_VOICE:-af_heart}"
     gpu="${TTS_KOKORO_GPU:-}"
     dtype="n/a"
+    runtime_image="${TTS_KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.3.0-amd64}"
+    runtime_container="ai-voice-kokoro"
     ;;
   *)
-    echo "usage: $0 [wavhost|kokoro] [runs]" >&2
+    echo "usage: $0 [wavhost|qwentts|kokoro] [runs]" >&2
     exit 2
     ;;
 esac
@@ -75,8 +88,14 @@ print(json.dumps({
 PY
 )"
 
+runtime_image_id=""
+if command -v docker >/dev/null 2>&1; then
+  runtime_image_id="$(docker inspect --format '{{.Image}}' "$runtime_container" 2>/dev/null || true)"
+fi
+
 BACKEND="$backend" BASE_URL="$base_url" MODEL="$model" VOICE="$voice" \
 TEXT="$text" RUNS="$runs" GPU="$gpu" DTYPE="$dtype" RUN_DIR="$run_dir" \
+RUNTIME_IMAGE="$runtime_image" RUNTIME_IMAGE_ID="$runtime_image_id" RUNTIME_CONTAINER="$runtime_container" \
 python3 - <<'PY' > "$run_dir/metadata.json"
 import json
 import os
@@ -89,7 +108,10 @@ print(json.dumps({
     "text": os.environ["TEXT"],
     "runs": int(os.environ["RUNS"]),
     "host_gpu_index": os.environ["GPU"],
-    "qwen_dtype": os.environ["DTYPE"],
+    "precision_or_quant": os.environ["DTYPE"],
+    "runtime_image": os.environ["RUNTIME_IMAGE"],
+    "runtime_image_id": os.environ["RUNTIME_IMAGE_ID"],
+    "runtime_container": os.environ["RUNTIME_CONTAINER"],
     "artifact_dir": os.environ["RUN_DIR"],
     "cache_state": "not reset by benchmark.sh",
 }, indent=2, sort_keys=True))

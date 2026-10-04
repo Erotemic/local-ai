@@ -45,6 +45,38 @@ services:
               device_ids: ["${TTS_WAVHOST_GPU:-1}"]
               capabilities: ["gpu"]
 
+  qwentts:
+    image: ${TTS_QWENTTS_IMAGE:-ghcr.io/serveurpersocom/qwentts.cpp:cuda12}
+    container_name: ai-voice-qwentts
+    restart: unless-stopped
+    ports:
+      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_QWENTTS_PORT:-11436}:8080"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      MODEL_PATH: /models/${TTS_QWENTTS_MODEL_FILE:-qwen-talker-0.6b-customvoice-Q8_0.gguf}
+      CODEC_PATH: /models/${TTS_QWENTTS_CODEC_FILE:-qwen-tokenizer-12hz-Q8_0.gguf}
+      MODEL_ALIAS: ${TTS_QWENTTS_MODEL_ALIAS:-qwen-0.6-customvoice-q8-ggml}
+      TTS_LANG: ${TTS_QWENTTS_LANGUAGE:-English}
+      HOST: 0.0.0.0
+      PORT: "8080"
+      CLAMP_FP16: ${TTS_QWENTTS_CLAMP_FP16:-1}
+      NO_FA: ${TTS_QWENTTS_NO_FA:-0}
+    volumes:
+      - ${HF_REPOS_ROOT:-/data/services/hf-repos}/Serveurperso/Qwen3-TTS-GGUF:/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_QWENTTS_GPU:-1}"]
+              capabilities: ["gpu"]
+
   kokoro:
     image: ${TTS_KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.3.0-amd64}
     container_name: ai-voice-kokoro

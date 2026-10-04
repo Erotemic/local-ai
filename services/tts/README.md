@@ -238,3 +238,82 @@ It is pinned to one selected GPU rather than exposing all GPUs. Wavhost can also
 serve its own `kokoro` model for interface comparison, but that is an optional
 model bundle and is not assumed to match the performance characteristics of the
 specialized Kokoro-FastAPI GPU image.
+
+## Quantized Q8_0 experiment with qwentts.cpp
+
+The full-precision PyTorch baseline is established and should not be repeated
+without a material runtime/code change. The next experiment uses qwentts.cpp as
+a genuinely quantized runtime rather than loading compressed weights and
+expanding them back to FP32 before generation.
+
+The experimental service is deliberately separate from Wavhost:
+
+```text
+Wavhost / official PyTorch       http://127.0.0.1:11435
+qwentts.cpp / Q8_0 GGUF          http://127.0.0.1:11436
+Kokoro-FastAPI baseline          http://127.0.0.1:8880
+```
+
+qwentts.cpp's upstream `cuda12` image is documented as containing CUDA device
+code from Pascal `sm_61` through newer architectures. Do not use its `cuda13`
+image on the GTX 1080 Ti: CUDA 13 no longer compiles pre-Turing targets.
+
+Provision only the quantized model bundle:
+
+```bash
+./setup.sh --with-model qwen-0.6-customvoice-q8-gguf
+```
+
+This downloads these two files from `Serveurperso/Qwen3-TTS-GGUF` into the
+shared Hugging Face repository root:
+
+```text
+qwen-talker-0.6b-customvoice-Q8_0.gguf
+qwen-tokenizer-12hz-Q8_0.gguf
+```
+
+The first experiment intentionally uses Q8_0 for both pieces because that is
+the matching runtime's recommended deployment quant and avoids relying on BF16
+execution on Pascal. Lower-bit Q4 is a later experiment only if Q8 is still too
+slow and its audio quality remains acceptable.
+
+Wavhost and qwentts.cpp both default to physical GPU 1, so they should not be
+resident simultaneously on an 11 GB 1080 Ti. Keep the standalone Kokoro service
+on GPU 0, but stop Wavhost before starting the quantized server:
+
+```bash
+docker compose stop wavhost
+./start-qwentts.sh
+./scripts/benchmark.sh qwentts 3
+```
+
+The qwentts benchmark goes through the same `/v1/audio/speech` request path and
+retains WAV/JSON/TSV artifacts under `{TTS_DATA_ROOT}/benchmarks`, so its RTF is
+directly comparable to the earlier Wavhost measurements. It uses the same
+lecture-like benchmark text and Ryan speaker.
+
+The Pascal defaults also set:
+
+```dotenv
+TTS_QWENTTS_CLAMP_FP16=1
+TTS_QWENTTS_NO_FA=0
+```
+
+qwentts.cpp documents clamping as protection for FP16 intermediate state on
+sub-Ampere CUDA devices. Flash attention remains enabled for the first run. If
+initialization or synthesis fails specifically in the attention path, change
+`TTS_QWENTTS_NO_FA=1`, recreate the qwentts container, and rerun before ruling
+out the runtime:
+
+```bash
+sed -i 's/^TTS_QWENTTS_NO_FA=.*/TTS_QWENTTS_NO_FA=1/' .env
+docker compose up -d --force-recreate qwentts
+./scripts/benchmark.sh qwentts 3
+```
+
+After the experiment, restore the full-precision service if desired:
+
+```bash
+docker compose stop qwentts
+./start.sh
+```

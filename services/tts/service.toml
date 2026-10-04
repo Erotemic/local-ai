@@ -1,7 +1,7 @@
 [service]
 name = "tts"
 display_name = "Local TTS"
-description = "Wavhost/Qwen TTS experiment with the accelerated Kokoro server retained as a baseline."
+description = "Wavhost/Qwen TTS with Kokoro baseline and an experimental quantized qwentts.cpp backend."
 compose_service = "wavhost"
 compose_build_target = "wavhost"
 bind_var = "LOCAL_AI_BIND_ADDRESS"
@@ -12,6 +12,7 @@ gpu_var = "TTS_WAVHOST_GPU"
 required = [
   "LOCAL_AI_SERVICE_ROOT",
   "LOCAL_AI_BIND_ADDRESS",
+  "HF_REPOS_ROOT",
   "TTS_DATA_ROOT",
   "TTS_WAVHOST_MODELS",
   "TTS_WAVHOST_PORT",
@@ -23,11 +24,22 @@ required = [
   "TTS_TORCHAUDIO_VERSION",
   "TTS_TORCH_CUDA_TAG",
   "TTS_QWEN_TTS_VERSION",
+  "TTS_QWENTTS_PORT",
+  "TTS_QWENTTS_GPU",
+  "TTS_QWENTTS_IMAGE",
+  "TTS_QWENTTS_MODEL_ALIAS",
+  "TTS_QWENTTS_MODEL_FILE",
+  "TTS_QWENTTS_CODEC_FILE",
+  "TTS_QWENTTS_LANGUAGE",
+  "TTS_QWENTTS_CLAMP_FP16",
+  "TTS_QWENTTS_NO_FA",
   "TTS_KOKORO_PORT",
   "TTS_KOKORO_GPU",
   "TTS_KOKORO_IMAGE",
   "TTS_BENCH_QWEN_MODEL",
   "TTS_BENCH_QWEN_VOICE",
+  "TTS_BENCH_QWENTTS_MODEL",
+  "TTS_BENCH_QWENTTS_VOICE",
   "TTS_BENCH_KOKORO_MODEL",
   "TTS_BENCH_KOKORO_VOICE",
 ]
@@ -121,3 +133,21 @@ container_path = "/state/.wavhost/models/checkpoints/kokoro/kokoro/latest"
 compose_service = "wavhost"
 command = ["wavhost", "pull", "kokoro", "--skip-deps", "--yes"]
 check_files = ["latest"]
+
+[[models]]
+name = "qwen-0.6-customvoice-q8-gguf"
+label = "Qwen3-TTS 0.6B CustomVoice Q8_0 GGUF + Q8_0 codec"
+required = false
+source = "huggingface"
+source_label = "hf://Serveurperso/Qwen3-TTS-GGUF"
+repository = "Serveurperso/Qwen3-TTS-GGUF"
+destination = "{HF_REPOS_ROOT}/Serveurperso/Qwen3-TTS-GGUF"
+container_path = "/models"
+include = [
+  "qwen-talker-0.6b-customvoice-Q8_0.gguf",
+  "qwen-tokenizer-12hz-Q8_0.gguf",
+]
+check_files = [
+  "qwen-talker-0.6b-customvoice-Q8_0.gguf",
+  "qwen-tokenizer-12hz-Q8_0.gguf",
+]

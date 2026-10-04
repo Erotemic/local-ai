@@ -505,3 +505,70 @@ A new experiment should normally be justified by a material change in runtime,
 quantization, kernels, model revision, sampling strategy, or serving pipeline.
 If none of those changed, repeating the same benchmark is unlikely to teach us
 more than the retained artifacts already do.
+
+## 2026-10-04: concrete Q8_0 experiment recipe
+
+The first quantized experiment was wired into `services/tts` after the FP32
+baselines above were established. This is deliberately a new backend rather
+than a Wavhost checkpoint swap because GGUF requires a different execution
+runtime.
+
+Selected runtime: `ServeurpersoCom/qwentts.cpp`, served by its upstream
+OpenAI-compatible `tts-server`. The local-ai recipe uses:
+
+```text
+image: ghcr.io/serveurpersocom/qwentts.cpp:cuda12
+port:  11436
+GPU:   physical GPU 1
+alias: qwen-0.6-customvoice-q8-ggml
+```
+
+Upstream's Docker documentation states that the `cuda12` image is built for a
+wide architecture range including Pascal `sm_61`; the `cuda13` image is not a
+Pascal option. This makes the prebuilt CUDA-12 image preferable to a bespoke
+local build for the first experiment.
+
+Selected model bundle, from `Serveurperso/Qwen3-TTS-GGUF`:
+
+```text
+qwen-talker-0.6b-customvoice-Q8_0.gguf   ~969 MB
+qwen-tokenizer-12hz-Q8_0.gguf            ~291 MB
+```
+
+The matching model card calls Q8_0 the recommended default. Start here rather
+than Q4_K_M: the existing 11 GB card is not VRAM-bound by a ~1.3 GB quantized
+model pair, and Q8 gives a lower-risk quality comparison. If Q8 performance is
+still inadequate, Q4_K_M becomes meaningful follow-up compute.
+
+Pascal-specific runtime defaults:
+
+```text
+CLAMP_FP16=1
+NO_FA=0
+```
+
+The clamp follows qwentts.cpp's own ABI documentation: it guards FP16 hidden
+state/intermediate behavior on sub-Ampere CUDA targets. Flash attention remains
+on initially; `NO_FA=1` is the first fallback if attention-specific errors occur.
+
+Exact first-run recipe:
+
+```bash
+cd ~/code/local-ai/services/tts
+./setup.sh --with-model qwen-0.6-customvoice-q8-gguf
+
+docker compose stop wavhost
+./start-qwentts.sh
+./scripts/benchmark.sh qwentts 3
+```
+
+Do **not** stop the standalone Kokoro baseline just for this experiment when it
+remains pinned to the other GPU. Wavhost and qwentts.cpp do share GPU 1 by
+default, so only one of those two should be resident during the 1080 Ti timing
+run.
+
+The benchmark uses the same retained-artifact convention as the PyTorch runs.
+Record the resulting `results.tsv`, generated WAVs, image identity, and whether
+`NO_FA` had to be changed before drawing conclusions. The principal threshold
+is whether Q8_0 gets below RTF 1.0; the prior 1080 Ti FP32 repeat baseline is
+RTF 3.284.
