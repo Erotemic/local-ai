@@ -187,6 +187,14 @@ From the repository root, inspect all configured services with:
 ./scripts/doctor.sh
 ```
 
+## Engineering journal
+
+Durable experiment measurements, failed approaches, and tentative conclusions
+live under `dev/journals/`. See `dev/journals/gpt56.md` for the Qwen3-TTS /
+Wavhost GPU experiments and quantization follow-up plan. These notes are
+intentionally rawer than the user-facing service documentation so future
+maintainers can avoid repeating expensive experiments.
+
 ## Repository policy
 
 - Track the recipe required to recreate an experiment from the first useful run.
