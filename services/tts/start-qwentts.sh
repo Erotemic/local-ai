@@ -10,11 +10,9 @@ if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
   exit 1
 fi
 
-# Preserve explicit one-shot overrides across the .env load below. This makes
-# experiments such as
-#   TTS_QWENTTS_CLAMP_FP16=0 ./start-qwentts.sh
-# safe without editing persistent machine configuration.
+# Preserve explicit one-shot overrides across the .env load below.
 qwentts_override_keys=(
+  TTS_BIND_ADDRESS
   TTS_QWENTTS_PORT
   TTS_QWENTTS_GPU
   TTS_QWENTTS_IMAGE
@@ -74,7 +72,11 @@ if (( ${#missing[@]} )); then
   exit 1
 fi
 
+bind_address="${TTS_BIND_ADDRESS:-127.0.0.1}"
+port="${TTS_QWENTTS_PORT:-11436}"
+
 echo "qwentts effective configuration:"
+echo "  bind=$bind_address:$port"
 echo "  gpu=${TTS_QWENTTS_GPU:-1}"
 echo "  image=${TTS_QWENTTS_IMAGE:-ghcr.io/serveurpersocom/qwentts.cpp:cuda12}"
 echo "  model=$model_root/$model_file"
@@ -83,8 +85,6 @@ echo "  language=${TTS_QWENTTS_LANGUAGE:-English}"
 echo "  clamp_fp16=${TTS_QWENTTS_CLAMP_FP16:-1}"
 echo "  no_fa=${TTS_QWENTTS_NO_FA:-0}"
 
-# The generic model check reads the persisted repo/service config. The direct
-# checks above additionally validate any one-shot environment overrides.
 uv run "$ROOT_DIR/scripts/local_ai.py" model check qwen-0.6-customvoice-q8-gguf --service-dir "$SERVICE_DIR"
 
 "$SERVICE_DIR/compose.sh" config --quiet
@@ -92,8 +92,6 @@ uv run "$ROOT_DIR/scripts/local_ai.py" model check qwen-0.6-customvoice-q8-gguf 
 "$SERVICE_DIR/compose.sh" up -d --no-build --pull never qwentts
 
 container="ai-voice-qwentts"
-port="${TTS_QWENTTS_PORT:-11436}"
-bind_address="${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}"
 health_host="$bind_address"
 case "$health_host" in
   0.0.0.0|::|"[::]") health_host="127.0.0.1" ;;
@@ -105,13 +103,17 @@ deadline=$((SECONDS + timeout_s))
 while (( SECONDS < deadline )); do
   if curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then
     echo "qwentts ready: http://${health_host}:${port}"
+    if [[ "$bind_address" == "0.0.0.0" || "$bind_address" == "::" || "$bind_address" == "[::]" ]]; then
+      echo "LAN clients may connect to http://<server-lan-ip>:${port}"
+    else
+      echo "client endpoint: http://${bind_address}:${port}"
+    fi
     exit 0
   fi
 
   state="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)"
   case "$state" in
-    running)
-      ;;
+    running) ;;
     created|restarting|exited|dead|removing|paused|"")
       echo "ERROR: qwentts did not remain running while starting (state=${state:-missing})." >&2
       "$SERVICE_DIR/compose.sh" ps -a qwentts >&2 || true

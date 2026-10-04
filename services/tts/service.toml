@@ -1,10 +1,10 @@
 [service]
 name = "tts"
 display_name = "Local TTS"
-description = "Wavhost/Qwen TTS with Kokoro baseline and an experimental quantized qwentts.cpp backend."
+description = "Local OpenAI-compatible TTS with qwentts.cpp, Wavhost, and Kokoro backends."
 compose_service = "wavhost"
 compose_build_target = "wavhost"
-bind_var = "LOCAL_AI_BIND_ADDRESS"
+bind_var = "TTS_BIND_ADDRESS"
 port_var = "TTS_WAVHOST_PORT"
 gpu_var = "TTS_WAVHOST_GPU"
 
@@ -14,6 +14,8 @@ required = [
   "LOCAL_AI_BIND_ADDRESS",
   "HF_REPOS_ROOT",
   "TTS_DATA_ROOT",
+  "TTS_BIND_ADDRESS",
+  "TTS_ACTIVE_BACKEND",
   "TTS_WAVHOST_MODELS",
   "TTS_WAVHOST_PORT",
   "TTS_WAVHOST_GPU",

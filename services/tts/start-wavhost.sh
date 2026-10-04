@@ -7,6 +7,4 @@ if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
   echo "Run ./setup.sh from $SERVICE_DIR" >&2
   exit 1
 fi
-"$SERVICE_DIR/compose.sh" config --quiet
-"$SERVICE_DIR/compose.sh" pull kokoro
-exec "$SERVICE_DIR/compose.sh" up -d --no-build --pull never kokoro
+exec uv run "$ROOT_DIR/scripts/local_ai.py" start --service-dir "$SERVICE_DIR" "$@"

@@ -12,7 +12,7 @@ services:
     container_name: ai-voice-wavhost
     restart: unless-stopped
     ports:
-      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_WAVHOST_PORT:-11435}:11435"
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_WAVHOST_PORT:-11435}:11435"
     environment:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       HOME: /state
@@ -51,7 +51,7 @@ services:
     container_name: ai-voice-qwentts
     restart: unless-stopped
     ports:
-      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_QWENTTS_PORT:-11436}:8080"
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_QWENTTS_PORT:-11436}:8080"
     environment:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       MODEL_PATH: /models/${TTS_QWENTTS_MODEL_FILE:-qwen-talker-0.6b-customvoice-Q8_0.gguf}
@@ -83,7 +83,7 @@ services:
     container_name: ai-voice-kokoro
     restart: unless-stopped
     ports:
-      - "${LOCAL_AI_BIND_ADDRESS:-127.0.0.1}:${TTS_KOKORO_PORT:-8880}:8880"
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_KOKORO_PORT:-8880}:8880"
     environment:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       PYTHONUNBUFFERED: "1"
