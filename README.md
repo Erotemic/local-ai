@@ -96,6 +96,7 @@ The default concrete service tree is:
 │   ├── triposplat/
 │   │   └── outputs/
 │   └── tts/
+│       ├── benchmarks/     # retained TTS benchmark audio + metadata
 │       └── wavhost/
 │           ├── .wavhost/   # content-addressed Wavhost models/voices
 │           └── cache/      # disposable HF/Torch/application cache

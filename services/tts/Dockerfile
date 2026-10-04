@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     espeak-ng \
     ffmpeg \
+    gcc \
+    libc6-dev \
     libsndfile1 \
     libsox-fmt-all \
     sox \

@@ -82,6 +82,7 @@ Concrete layout:
 │   └── outputs/             # generated .ply/.splat assets
 │
 └── tts/
+    ├── benchmarks/          # retained benchmark WAVs + metadata/timings
     └── wavhost/
         ├── .wavhost/        # model blobs/manifests/checkpoints + saved voices
         └── cache/           # disposable HF/Torch/application cache
@@ -102,8 +103,10 @@ Wavhost model storage is service-owned rather than placed in `HF_REPOS_ROOT`:
 Wavhost intentionally maintains its own content-addressed blob/manifests layout
 and materialized checkpoints. Model weights are reconstructible, while saved
 voice reference audio under the same Wavhost home should be treated as user
-data if voice cloning is used. The separate Kokoro-FastAPI baseline does not
-need a host data volume for ordinary API synthesis.
+data if voice cloning is used. Benchmark WAVs and their request/timing metadata
+are retained under `tts/benchmarks/` as user-managed experimental outputs. The
+separate Kokoro-FastAPI baseline does not need a host data volume for ordinary
+API synthesis.
 
 ## Workspaces
 

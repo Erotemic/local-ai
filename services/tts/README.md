@@ -42,14 +42,32 @@ Start the Kokoro baseline separately when you want an A/B comparison:
 ./scripts/benchmark.sh kokoro 2
 ```
 
-The benchmark labels the first request as cold and later requests as warm and,
-when `ffprobe` is available, reports real-time factor:
+The benchmark preserves every generated WAV plus `metadata.json`, `request.json`,
+and `results.tsv` under `{TTS_DATA_ROOT}/benchmarks` by default. It deliberately
+does **not** call the first request "cold": the script does not reset the server
+or model cache, so the first request in a benchmark invocation may already be
+warm. When `ffprobe` is available it reports real-time factor:
 
 ```text
 RTF = generation wall time / generated audio duration
 ```
 
 RTF below 1 means synthesis is faster than playback.
+
+For example, a run creates a directory resembling:
+
+```text
+/data/local-ai/services/tts/benchmarks/20261004T191500Z-wavhost-qwen-0.6-customvoice-Ryan/
+├── input.txt
+├── metadata.json
+├── request.json
+├── results.tsv
+├── run-01.wav
+├── run-02.wav
+└── run-03.wav
+```
+
+Set `TTS_BENCH_OUTPUT_DIR` if benchmark artifacts should live elsewhere.
 
 ## Why the Wavhost image is pinned this way
 
@@ -88,6 +106,11 @@ WAVHOST_QWEN_DTYPE=float16
 
 No FlashAttention installation is attempted; FlashAttention 2 is not a Pascal
 path.
+
+Qwen's manual PyTorch/Triton path JIT-compiles a small native launcher on first
+generation. The image therefore includes the minimal host compiler pieces
+(`gcc` and `libc6-dev`) needed by Triton; omitting them causes generation to fail
+with `Failed to find C compiler`.
 
 Wavhost in this overlay also keeps model backends warm across HTTP requests.
 That matters for the Android reader because it requests many consecutive text

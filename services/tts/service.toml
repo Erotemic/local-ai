@@ -56,6 +56,12 @@ path = "{TTS_DATA_ROOT}/wavhost/cache"
 role = "Hugging Face, Torch, and application caches"
 retention = "disposable"
 
+[[directories]]
+label = "TTS benchmark artifacts"
+path = "{TTS_DATA_ROOT}/benchmarks"
+role = "Retained TTS benchmark audio, requests, metadata, and timing results"
+retention = "experimental outputs; user-managed"
+
 [[models]]
 name = "qwen-0.6-customvoice"
 label = "Qwen3-TTS 0.6B CustomVoice"
