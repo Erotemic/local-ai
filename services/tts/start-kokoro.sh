@@ -7,12 +7,5 @@ if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
   echo "Run ./setup.sh from $SERVICE_DIR" >&2
   exit 1
 fi
-set -a
-# shellcheck disable=SC1091
-source "$ROOT_DIR/.env"
-# shellcheck disable=SC1091
-source "$SERVICE_DIR/.env"
-set +a
-cd "$SERVICE_DIR"
-docker compose config --quiet
-exec docker compose up -d --no-build --pull never kokoro
+"$SERVICE_DIR/compose.sh" config --quiet
+exec "$SERVICE_DIR/compose.sh" up -d --no-build --pull never kokoro

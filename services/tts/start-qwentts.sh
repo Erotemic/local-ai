@@ -10,7 +10,28 @@ if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
   exit 1
 fi
 
-uv run "$ROOT_DIR/scripts/local_ai.py" model check qwen-0.6-customvoice-q8-gguf --service-dir "$SERVICE_DIR"
+# Preserve explicit one-shot overrides across the .env load below. This makes
+# experiments such as
+#   TTS_QWENTTS_CLAMP_FP16=0 ./start-qwentts.sh
+# safe without editing persistent machine configuration.
+qwentts_override_keys=(
+  TTS_QWENTTS_PORT
+  TTS_QWENTTS_GPU
+  TTS_QWENTTS_IMAGE
+  TTS_QWENTTS_MODEL_ALIAS
+  TTS_QWENTTS_MODEL_FILE
+  TTS_QWENTTS_CODEC_FILE
+  TTS_QWENTTS_LANGUAGE
+  TTS_QWENTTS_CLAMP_FP16
+  TTS_QWENTTS_NO_FA
+  TTS_QWENTTS_START_TIMEOUT
+)
+declare -A inherited_overrides=()
+for key in "${qwentts_override_keys[@]}"; do
+  if [[ -v "$key" ]]; then
+    inherited_overrides["$key"]="${!key}"
+  fi
+done
 
 set -a
 # shellcheck disable=SC1091
@@ -18,11 +39,57 @@ source "$ROOT_DIR/.env"
 # shellcheck disable=SC1091
 source "$SERVICE_DIR/.env"
 set +a
+for key in "${!inherited_overrides[@]}"; do
+  export "$key=${inherited_overrides[$key]}"
+done
 
-cd "$SERVICE_DIR"
-docker compose config --quiet
-docker compose pull qwentts
-docker compose up -d --no-build --pull never qwentts
+validate_bool() {
+  local key="$1"
+  local value="${!key:-}"
+  if [[ "$value" != "0" && "$value" != "1" ]]; then
+    echo "ERROR: $key must be 0 or 1; got '$value'." >&2
+    exit 2
+  fi
+}
+validate_bool TTS_QWENTTS_CLAMP_FP16
+validate_bool TTS_QWENTTS_NO_FA
+
+timeout_s="${TTS_QWENTTS_START_TIMEOUT:-180}"
+if ! [[ "$timeout_s" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: TTS_QWENTTS_START_TIMEOUT must be a positive integer; got '$timeout_s'." >&2
+  exit 2
+fi
+
+model_root="${HF_REPOS_ROOT:-/data/services/hf-repos}/Serveurperso/Qwen3-TTS-GGUF"
+model_file="${TTS_QWENTTS_MODEL_FILE:-qwen-talker-0.6b-customvoice-Q8_0.gguf}"
+codec_file="${TTS_QWENTTS_CODEC_FILE:-qwen-tokenizer-12hz-Q8_0.gguf}"
+missing=()
+[[ -f "$model_root/$model_file" ]] || missing+=("$model_root/$model_file")
+[[ -f "$model_root/$codec_file" ]] || missing+=("$model_root/$codec_file")
+if (( ${#missing[@]} )); then
+  echo "ERROR: qwentts model mount is incomplete:" >&2
+  printf '  - %s\n' "${missing[@]}" >&2
+  echo "Configured HF_REPOS_ROOT=${HF_REPOS_ROOT:-/data/services/hf-repos}" >&2
+  echo "Run ./setup.sh --with-model qwen-0.6-customvoice-q8-gguf" >&2
+  exit 1
+fi
+
+echo "qwentts effective configuration:"
+echo "  gpu=${TTS_QWENTTS_GPU:-1}"
+echo "  image=${TTS_QWENTTS_IMAGE:-ghcr.io/serveurpersocom/qwentts.cpp:cuda12}"
+echo "  model=$model_root/$model_file"
+echo "  codec=$model_root/$codec_file"
+echo "  language=${TTS_QWENTTS_LANGUAGE:-English}"
+echo "  clamp_fp16=${TTS_QWENTTS_CLAMP_FP16:-1}"
+echo "  no_fa=${TTS_QWENTTS_NO_FA:-0}"
+
+# The generic model check reads the persisted repo/service config. The direct
+# checks above additionally validate any one-shot environment overrides.
+uv run "$ROOT_DIR/scripts/local_ai.py" model check qwen-0.6-customvoice-q8-gguf --service-dir "$SERVICE_DIR"
+
+"$SERVICE_DIR/compose.sh" config --quiet
+"$SERVICE_DIR/compose.sh" pull qwentts
+"$SERVICE_DIR/compose.sh" up -d --no-build --pull never qwentts
 
 container="ai-voice-qwentts"
 port="${TTS_QWENTTS_PORT:-11436}"
@@ -32,12 +99,6 @@ case "$health_host" in
   0.0.0.0|::|"[::]") health_host="127.0.0.1" ;;
 esac
 health_url="http://${health_host}:${port}/health"
-timeout_s="${TTS_QWENTTS_START_TIMEOUT:-180}"
-
-if ! [[ "$timeout_s" =~ ^[1-9][0-9]*$ ]]; then
-  echo "ERROR: TTS_QWENTTS_START_TIMEOUT must be a positive integer; got '$timeout_s'." >&2
-  exit 2
-fi
 
 echo "Waiting for qwentts to become ready: $health_url (timeout ${timeout_s}s)"
 deadline=$((SECONDS + timeout_s))
@@ -53,9 +114,9 @@ while (( SECONDS < deadline )); do
       ;;
     created|restarting|exited|dead|removing|paused|"")
       echo "ERROR: qwentts did not remain running while starting (state=${state:-missing})." >&2
-      docker compose ps -a qwentts >&2 || true
+      "$SERVICE_DIR/compose.sh" ps -a qwentts >&2 || true
       echo "--- qwentts logs ---" >&2
-      docker compose logs --tail=200 qwentts >&2 || true
+      "$SERVICE_DIR/compose.sh" logs --tail=200 qwentts >&2 || true
       exit 1
       ;;
   esac
@@ -63,7 +124,7 @@ while (( SECONDS < deadline )); do
 done
 
 echo "ERROR: qwentts did not become healthy within ${timeout_s}s." >&2
-docker compose ps -a qwentts >&2 || true
+"$SERVICE_DIR/compose.sh" ps -a qwentts >&2 || true
 echo "--- qwentts logs ---" >&2
-docker compose logs --tail=200 qwentts >&2 || true
+"$SERVICE_DIR/compose.sh" logs --tail=200 qwentts >&2 || true
 exit 1

@@ -89,16 +89,66 @@ PY
 )"
 
 runtime_image_id=""
+runtime_device_ids=""
+runtime_clamp_fp16=""
+runtime_no_fa=""
+runtime_language=""
+runtime_model_path=""
+runtime_codec_path=""
+runtime_model_alias=""
+runtime_wavhost_dtype=""
+runtime_wavhost_cache_size=""
+
+container_env_value() {
+  local key="$1"
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$runtime_container" 2>/dev/null \
+    | sed -n "s/^${key}=//p" | tail -n 1
+}
+
 if command -v docker >/dev/null 2>&1; then
+  actual_runtime_image="$(docker inspect --format '{{.Config.Image}}' "$runtime_container" 2>/dev/null || true)"
+  [[ -n "$actual_runtime_image" ]] && runtime_image="$actual_runtime_image"
   runtime_image_id="$(docker inspect --format '{{.Image}}' "$runtime_container" 2>/dev/null || true)"
+  runtime_device_ids="$(docker inspect --format '{{range .HostConfig.DeviceRequests}}{{range .DeviceIDs}}{{printf "%s " .}}{{end}}{{end}}' "$runtime_container" 2>/dev/null | xargs || true)"
+  if [[ "$backend" == "qwentts" ]]; then
+    runtime_clamp_fp16="$(container_env_value CLAMP_FP16)"
+    runtime_no_fa="$(container_env_value NO_FA)"
+    runtime_language="$(container_env_value TTS_LANG)"
+    runtime_model_path="$(container_env_value MODEL_PATH)"
+    runtime_codec_path="$(container_env_value CODEC_PATH)"
+    runtime_model_alias="$(container_env_value MODEL_ALIAS)"
+  elif [[ "$backend" == "wavhost" ]]; then
+    runtime_wavhost_dtype="$(container_env_value WAVHOST_QWEN_DTYPE)"
+    runtime_wavhost_cache_size="$(container_env_value WAVHOST_BACKEND_CACHE_SIZE)"
+  fi
 fi
+actual_gpu="${runtime_device_ids:-$gpu}"
 
 BACKEND="$backend" BASE_URL="$base_url" MODEL="$model" VOICE="$voice" \
-TEXT="$text" RUNS="$runs" GPU="$gpu" DTYPE="$dtype" RUN_DIR="$run_dir" \
+TEXT="$text" RUNS="$runs" GPU="$gpu" ACTUAL_GPU="$actual_gpu" DTYPE="$dtype" RUN_DIR="$run_dir" \
 RUNTIME_IMAGE="$runtime_image" RUNTIME_IMAGE_ID="$runtime_image_id" RUNTIME_CONTAINER="$runtime_container" \
+RUNTIME_CLAMP_FP16="$runtime_clamp_fp16" RUNTIME_NO_FA="$runtime_no_fa" \
+RUNTIME_LANGUAGE="$runtime_language" RUNTIME_MODEL_PATH="$runtime_model_path" \
+RUNTIME_CODEC_PATH="$runtime_codec_path" RUNTIME_MODEL_ALIAS="$runtime_model_alias" \
+RUNTIME_WAVHOST_DTYPE="$runtime_wavhost_dtype" RUNTIME_WAVHOST_CACHE_SIZE="$runtime_wavhost_cache_size" \
 python3 - <<'PY' > "$run_dir/metadata.json"
 import json
 import os
+
+runtime_knobs = {}
+for key, env_key in [
+    ("clamp_fp16", "RUNTIME_CLAMP_FP16"),
+    ("no_fa", "RUNTIME_NO_FA"),
+    ("language", "RUNTIME_LANGUAGE"),
+    ("model_path", "RUNTIME_MODEL_PATH"),
+    ("codec_path", "RUNTIME_CODEC_PATH"),
+    ("model_alias", "RUNTIME_MODEL_ALIAS"),
+    ("wavhost_qwen_dtype", "RUNTIME_WAVHOST_DTYPE"),
+    ("wavhost_backend_cache_size", "RUNTIME_WAVHOST_CACHE_SIZE"),
+]:
+    value = os.environ.get(env_key, "")
+    if value != "":
+        runtime_knobs[key] = value
 
 print(json.dumps({
     "backend": os.environ["BACKEND"],
@@ -107,11 +157,13 @@ print(json.dumps({
     "voice": os.environ["VOICE"],
     "text": os.environ["TEXT"],
     "runs": int(os.environ["RUNS"]),
-    "host_gpu_index": os.environ["GPU"],
+    "configured_host_gpu_index": os.environ["GPU"],
+    "runtime_docker_device_ids": os.environ["ACTUAL_GPU"],
     "precision_or_quant": os.environ["DTYPE"],
     "runtime_image": os.environ["RUNTIME_IMAGE"],
     "runtime_image_id": os.environ["RUNTIME_IMAGE_ID"],
     "runtime_container": os.environ["RUNTIME_CONTAINER"],
+    "runtime_knobs": runtime_knobs,
     "artifact_dir": os.environ["RUN_DIR"],
     "cache_state": "not reset by benchmark.sh",
 }, indent=2, sort_keys=True))
@@ -120,7 +172,12 @@ printf 'run\tphase\tcurl_exit\thttp_code\telapsed_s\taudio_s\trtf\tbytes\tfile\n
 printf '%s\n' "$text" > "$run_dir/input.txt"
 printf '%s\n' "$payload" > "$run_dir/request.json"
 
-echo "backend=$backend url=$base_url model=$model voice=$voice runs=$runs dtype=$dtype gpu=$gpu"
+echo "backend=$backend url=$base_url model=$model voice=$voice runs=$runs dtype=$dtype gpu=$actual_gpu"
+if [[ "$backend" == "qwentts" ]]; then
+  echo "runtime_knobs=clamp_fp16=${runtime_clamp_fp16:-unknown} no_fa=${runtime_no_fa:-unknown} language=${runtime_language:-unknown}"
+elif [[ "$backend" == "wavhost" ]]; then
+  echo "runtime_knobs=qwen_dtype=${runtime_wavhost_dtype:-unknown} backend_cache_size=${runtime_wavhost_cache_size:-unknown}"
+fi
 echo "artifacts=$run_dir"
 echo "note=benchmark.sh does not reset the server/model cache; phase=first means first request in this invocation, not necessarily a cold model load"
 

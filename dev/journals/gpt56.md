@@ -614,3 +614,221 @@ Follow-up harness changes:
 - `benchmark.sh` refuses to benchmark an unhealthy Wavhost/qwentts server and records curl transport failures without assuming an output WAV exists. It saves a container-log snapshot beside failed benchmark artifacts.
 
 This preserves the first attempt as an infrastructure/readiness observation rather than contaminating the Q8 performance baseline with a startup race.
+
+### 2026-10-04: Q8_0 qwentts.cpp results on GTX 1080 Ti and RTX 3090
+
+The readiness-hardened qwentts path subsequently reached `/health` on the GTX
+1080 Ti and produced valid audio. This closes the earlier startup-race question:
+the upstream CUDA-12 image and the selected Q8_0 model bundle do run on Pascal.
+
+#### GTX 1080 Ti / qwentts.cpp / Q8_0
+
+Runtime configuration at the time of this benchmark:
+
+```text
+backend:       qwentts.cpp CUDA-12 image
+model:         qwen-talker-0.6b-customvoice-Q8_0.gguf
+codec:         qwen-tokenizer-12hz-Q8_0.gguf
+voice:         ryan
+physical GPU:  1 (GTX 1080 Ti)
+CLAMP_FP16:    1
+NO_FA:         0
+```
+
+Retained artifact directory printed by the benchmark:
+
+```text
+/data/services/local-ai/tts/tts/benchmarks/20261004T214108Z-qwentts-qwen-0.6-customvoice-q8-ggml-ryan
+```
+
+The doubled `tts/tts` here is historical host configuration from before the
+storage-root default cleanup; it is not part of the runtime result.
+
+Raw timing data:
+
+| Run | Phase | Wall (s) | Audio (s) | RTF | Bytes |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | first | 6.949 | 27.600 | 0.252 | 1,324,844 |
+| 2 | repeat | 6.272 | 25.200 | 0.249 | 1,209,644 |
+| 3 | repeat | 5.531 | 23.120 | 0.239 | 1,109,804 |
+
+Mean repeat RTF: **0.244**, or about **4.10x real-time throughput**.
+
+Compared with the earlier Wavhost/PyTorch FP32 repeat mean of 3.284 on the same
+class of GPU, the observed end-to-end RTF improved by about **13.5x**. This is
+**not a quantization-only speedup claim**: both quantization and execution
+runtime changed at once (PyTorch/Qwen package -> qwentts.cpp/GGML CUDA).
+
+This result changes the practical conclusion for the 1080 Ti. Full-precision
+Qwen was too slow for steady-state reader use, but the Q8_0 qwentts.cpp path is
+comfortably faster than real time and is now a viable deployment candidate,
+subject to acceptable audio quality and operational stability.
+
+#### RTX 3090 / qwentts.cpp / Q8_0, clamp enabled
+
+The first matching 3090 measurement used physical GPU 0 and the same Q8_0
+runtime/model. The retained artifact directory was:
+
+```text
+/data/local-ai/services/tts/benchmarks/20261004T224446Z-qwentts-qwen-0.6-customvoice-q8-ggml-ryan
+```
+
+This development machine still had an older explicit `TTS_DATA_ROOT` at the
+time of the run, hence `/data/local-ai/...` rather than the newer repository
+default `/data/services/...`. Do not interpret that path difference as a runtime
+difference.
+
+Raw timing data:
+
+| Run | Phase | Wall (s) | Audio (s) | RTF | Bytes |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | first | 10.355 | 62.320 | 0.166 | 2,991,404 |
+| 2 | repeat | 12.510 | 76.640 | 0.163 | 3,678,764 |
+| 3 | repeat | 17.909 | 106.480 | 0.168 | 5,111,084 |
+
+Mean repeat RTF: **0.1655**, or about **6.04x real-time throughput**.
+
+The 3090 Q8 repeat RTF is about **1.47x faster** than the 1080 Ti Q8 repeat RTF
+(0.1655 vs 0.244). Relative to the earlier confirmed Wavhost/PyTorch FP32 3090
+repeat mean of 1.559, the observed qwentts.cpp/Q8 path is about **9.4x lower
+RTF**. Again, this combines runtime and quantization changes and should not be
+reported as a pure Q8 speedup.
+
+The large variation in generated audio duration (62.32 to 106.48 seconds) is a
+reminder that this benchmark exercises stochastic generation. RTF is the useful
+normalization; wall time alone is misleading. For a cleaner runtime
+microcomparison, add a deterministic/greedy benchmark only if both runtimes can
+be configured equivalently, but preserve this default-sampling workload because
+it reflects actual intended use.
+
+#### Failed second 3090 attempt was a Compose configuration footgun, not a clamp result
+
+An attempted second 3090 run changed `TTS_QWENTTS_CLAMP_FP16` and then manually
+recreated the service with raw `docker compose`. qwentts never reached
+inference. Its log failed at model open:
+
+```text
+[GGUF] Cannot open /models/qwen-talker-0.6b-customvoice-Q8_0.gguf
+[Pipeline] failed to load talker GGUF: /models/qwen-talker-0.6b-customvoice-Q8_0.gguf
+[Server] FATAL: qt_init: pipeline_tts_load failed ...
+```
+
+Root cause: raw Compose invoked from `services/tts` automatically read only that
+directory's `.env`; machine-wide `HF_REPOS_ROOT` lives in `../../.env`. The
+first successful start had gone through `start-qwentts.sh`, which loaded both.
+The manual recreate therefore fell back to the compose default
+`/data/services/hf-repos`, while this development machine's existing Q8 files
+were under its older configured root. The bind mount pointed at the wrong host
+directory and `/models/...` was empty/missing in the container.
+
+**Do not record this as `CLAMP_FP16=0` failing.** No clamp comparison occurred.
+
+Follow-up lifecycle hardening:
+
+- `services/tts/compose.sh` is now the direct Compose entry point. It always
+  supplies both `../../.env` and `services/tts/.env` with `--env-file`.
+- Caller environment variables retain higher Compose precedence, enabling safe
+  one-shot knob overrides without editing config.
+- `start-qwentts.sh` preserves explicit `TTS_QWENTTS_*` environment overrides,
+  validates boolean/timeout knobs, checks the resolved host model and codec
+  files before launch, and prints the effective runtime configuration.
+- `benchmark.sh` records selected safe values from the **actual running Docker
+  container**, rather than assuming current `.env` still describes the process.
+
+Use this form for future knob experiments:
+
+```bash
+TTS_QWENTTS_CLAMP_FP16=0 ./start-qwentts.sh
+./scripts/benchmark.sh qwentts 3
+```
+
+For raw Compose operations, use:
+
+```bash
+./compose.sh stop qwentts
+./compose.sh up -d --force-recreate qwentts
+```
+
+rather than `docker compose ...` directly.
+
+#### qwentts.cpp knobs currently exposed by local-ai
+
+These are the qwentts experiment controls that existed when the above
+measurements were made. Preserve them in benchmark metadata whenever they
+change:
+
+| local-ai variable | qwentts container/runtime effect | Baseline value |
+| --- | --- | --- |
+| `TTS_QWENTTS_GPU` | Docker physical GPU device request | `1` on Ooo; `0` on toothbrush |
+| `TTS_QWENTTS_IMAGE` | Runtime image | `ghcr.io/serveurpersocom/qwentts.cpp:cuda12` |
+| `TTS_QWENTTS_MODEL_FILE` | `MODEL_PATH` under `/models` | `qwen-talker-0.6b-customvoice-Q8_0.gguf` |
+| `TTS_QWENTTS_CODEC_FILE` | `CODEC_PATH` under `/models` | `qwen-tokenizer-12hz-Q8_0.gguf` |
+| `TTS_QWENTTS_MODEL_ALIAS` | OpenAI model identity | `qwen-0.6-customvoice-q8-ggml` |
+| `TTS_QWENTTS_LANGUAGE` | `TTS_LANG` | `English` |
+| `TTS_QWENTTS_CLAMP_FP16` | `CLAMP_FP16` | `1` for initial cross-GPU comparison |
+| `TTS_QWENTTS_NO_FA` | `NO_FA` | `0` (flash attention enabled) |
+| `TTS_QWENTTS_PORT` | host port | `11436` |
+| `TTS_QWENTTS_START_TIMEOUT` | local-ai readiness wait | `180` seconds |
+
+The image digest/ID is also part of a reproducible benchmark even though it is
+not a human-tuned knob; `benchmark.sh` records it because the `:cuda12` tag is
+mutable.
+
+### Updated performance baseline after Q8_0 experiment
+
+As of the measurements above, avoid duplicating these runs unless a material
+runtime/model/kernel/configuration change justifies it:
+
+| Runtime/model | GPU | Repeat RTF | Approx. real-time throughput |
+| --- | --- | ---: | ---: |
+| Wavhost / PyTorch FP32 | RTX 3090 | 1.559 | 0.64x |
+| Wavhost / PyTorch FP32 | GTX 1080 Ti | 3.284 | 0.30x |
+| qwentts.cpp / GGUF Q8_0 / clamp=1 / FA on | RTX 3090 | 0.1655 | 6.04x |
+| qwentts.cpp / GGUF Q8_0 / clamp=1 / FA on | GTX 1080 Ti | 0.244 | 4.10x |
+
+The highest-value immediate remaining comparison is the intended 3090
+`CLAMP_FP16=0` run using the hardened launch path. Q4 is no longer required to
+meet a real-time performance threshold; only investigate lower-bit variants if
+there is a separate memory/throughput objective and retained audio confirms the
+quality tradeoff is acceptable.
+
+### Wavhost upstream contribution status after hardware validation
+
+The Wavhost changes developed during this work are tracked upstream as:
+
+```text
+https://github.com/smitgol/wavhost/pull/14
+[WIP] Improve Qwen CUDA compatibility and server reuse
+```
+
+At the time of the final polish pass, that PR covered capability-aware Qwen
+dtype selection, warm backend reuse, package-wide server logging, and explicit
+noninteractive `wavhost pull --yes` provisioning. Real-hardware validation now
+exists for the motivating compatibility case: patched Wavhost generated valid
+Qwen3-TTS 0.6B CustomVoice audio on a GTX 1080 Ti in FP32. The qwentts.cpp Q8
+work is local-ai experimentation and is **not** part of the Wavhost PR.
+
+Before calling PR #14 merge-ready, the submodule received a deliberately narrow
+polish pass rather than another architectural change:
+
+- `CHANGELOG.md` records dtype selection, warm backend caching, package logging,
+  and `pull --yes`.
+- `--yes` tests assert that automation removes interactive prompts but still
+  displays the model license text being accepted.
+- logging tests assert package-handler setup is idempotent and does not multiply
+  output handlers across entry points.
+- README notes that dtype selection cannot compensate for a PyTorch wheel that
+  has dropped the target GPU architecture, and records that the Pascal path was
+  exercised on a GTX 1080 Ti with a CUDA 12.6 PyTorch build.
+
+Validation after that polish pass:
+
+```text
+Wavhost pytest: 193 passed, 4 skipped
+```
+
+A standalone Ruff invocation was not available in the artifact-building
+container, so do not misrecord Ruff as having been run there. Python compilation,
+`git diff --check`, and the full pytest suite passed. The implementation had
+already passed the earlier Wavhost test cycles before this documentation/test
+polish as well.

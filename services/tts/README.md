@@ -282,10 +282,16 @@ resident simultaneously on an 11 GB 1080 Ti. Keep the standalone Kokoro service
 on GPU 0, but stop Wavhost before starting the quantized server:
 
 ```bash
-docker compose stop wavhost
+./compose.sh stop wavhost
 ./start-qwentts.sh
 ./scripts/benchmark.sh qwentts 3
 ```
+
+Use `./compose.sh`, not a bare `docker compose`, for direct lifecycle commands.
+The wrapper always supplies both the machine-wide `../../.env` and service-local
+`.env`; without it, a manual recreate can silently fall back to compose defaults
+for paths such as `HF_REPOS_ROOT`. Caller environment variables still override
+the files, so one-off experiments do not require editing persistent config.
 
 The qwentts benchmark goes through the same `/v1/audio/speech` request path and
 retains WAV/JSON/TSV artifacts under `{TTS_DATA_ROOT}/benchmarks`, so its RTF is
@@ -300,20 +306,34 @@ TTS_QWENTTS_NO_FA=0
 ```
 
 qwentts.cpp documents clamping as protection for FP16 intermediate state on
-sub-Ampere CUDA devices. Flash attention remains enabled for the first run. If
-initialization or synthesis fails specifically in the attention path, change
-`TTS_QWENTTS_NO_FA=1`, recreate the qwentts container, and rerun before ruling
-out the runtime:
+sub-Ampere CUDA devices. Flash attention remains enabled for the first run.
+Every qwentts setting can be overridden for a single start without editing
+`.env`; `start-qwentts.sh` preserves explicit `TTS_QWENTTS_*` environment
+variables after loading the configured files. For example, compare the same
+model with FP16 clamping disabled via:
 
 ```bash
-sed -i 's/^TTS_QWENTTS_NO_FA=.*/TTS_QWENTTS_NO_FA=1/' .env
-docker compose up -d --force-recreate qwentts
+TTS_QWENTTS_CLAMP_FP16=0 ./start-qwentts.sh
 ./scripts/benchmark.sh qwentts 3
 ```
+
+If initialization or synthesis fails specifically in the attention path, test
+the no-flash-attention fallback independently:
+
+```bash
+TTS_QWENTTS_NO_FA=1 ./start-qwentts.sh
+./scripts/benchmark.sh qwentts 3
+```
+
+`start-qwentts.sh` prints the effective GPU, image, host model paths, language,
+`CLAMP_FP16`, and `NO_FA` before recreating the service. The benchmark then
+reads the actual running container configuration and records those safe runtime
+knobs in `metadata.json`, so a one-off override is not lost from the experiment
+record.
 
 After the experiment, restore the full-precision service if desired:
 
 ```bash
-docker compose stop qwentts
+./compose.sh stop qwentts
 ./start.sh
 ```

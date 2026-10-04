@@ -19,10 +19,4 @@ for arg in "$@"; do
 done
 
 # Keep the known-good Kokoro image available without making start download it.
-set -a
-# shellcheck disable=SC1091
-source "$ROOT_DIR/.env"
-# shellcheck disable=SC1091
-source "$SERVICE_DIR/.env"
-set +a
-docker compose -f "$SERVICE_DIR/compose.yaml" --project-directory "$SERVICE_DIR" pull kokoro
+"$SERVICE_DIR/compose.sh" pull kokoro
