@@ -20,3 +20,4 @@
 # Python noise from helper scripts
 __pycache__/
 *.py[cod]
+*.tar.gz
