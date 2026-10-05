@@ -62,7 +62,7 @@ services:
       TTS_LANG: ${TTS_QWENTTS_LANGUAGE:-English}
       HOST: 0.0.0.0
       PORT: "8080"
-      CLAMP_FP16: ${TTS_QWENTTS_CLAMP_FP16:-1}
+      CLAMP_FP16: ${TTS_QWENTTS_CLAMP_FP16:-0}
       NO_FA: ${TTS_QWENTTS_NO_FA:-0}
     volumes:
       - ${HF_REPOS_ROOT:?run ./setup.sh and use ./compose.sh}/Serveurperso/Qwen3-TTS-GGUF:/models:ro
@@ -79,7 +79,6 @@ services:
             - driver: nvidia
               device_ids: ["${TTS_QWENTTS_GPU:-1}"]
               capabilities: ["gpu"]
-
 
   # Client-facing deployment shim: discovery proxy + bounded qwentts retries +
   # WAV->MP3 conversion. It reuses the already-built Wavhost image for Python

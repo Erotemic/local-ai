@@ -71,7 +71,17 @@ if (( ${#missing[@]} )); then
   echo "ERROR: qwentts model mount is incomplete:" >&2
   printf '  - %s\n' "${missing[@]}" >&2
   echo "Configured HF_REPOS_ROOT=${HF_REPOS_ROOT:-/data/services/hf-repos}" >&2
-  echo "Run ./setup.sh --with-model qwen-0.6-customvoice-q8-gguf" >&2
+  case "$model_file" in
+    qwen-talker-0.6b-customvoice-Q8_0.gguf)
+      echo "Run ./setup.sh --with-model qwen-0.6-customvoice-q8-gguf" >&2
+      ;;
+    qwen-talker-1.7b-customvoice-Q8_0.gguf)
+      echo "Run ./setup.sh --with-model qwen-1.7-customvoice-q8-gguf" >&2
+      ;;
+    *)
+      echo "Provision the configured talker and codec files under $model_root." >&2
+      ;;
+  esac
   exit 1
 fi
 
@@ -85,14 +95,15 @@ echo "  image=${TTS_QWENTTS_IMAGE:-ghcr.io/serveurpersocom/qwentts.cpp:cuda12}"
 echo "  model=$model_root/$model_file"
 echo "  codec=$model_root/$codec_file"
 echo "  language=${TTS_QWENTTS_LANGUAGE:-English}"
-echo "  clamp_fp16=${TTS_QWENTTS_CLAMP_FP16:-1}"
+echo "  clamp_fp16=${TTS_QWENTTS_CLAMP_FP16:-0}"
 echo "  no_fa=${TTS_QWENTTS_NO_FA:-0}"
 echo "  gateway_port=${TTS_QWENTTS_GATEWAY_PORT:-11437}"
 echo "  gateway_retries=${TTS_QWENTTS_GATEWAY_RETRIES:-2}"
 echo "  gateway_mp3_bitrate=${TTS_QWENTTS_MP3_BITRATE_KBPS:-64}k"
 
-uv run "$ROOT_DIR/scripts/local_ai.py" model check qwen-0.6-customvoice-q8-gguf --service-dir "$SERVICE_DIR"
-
+# The exact configured talker/codec files above are the startup authority. Do
+# not hard-code a second model-bundle check here: qwentts can load multiple
+# supported GGUF sizes/variants from the same shared repository.
 "$SERVICE_DIR/compose.sh" config --quiet
 "$SERVICE_DIR/compose.sh" pull qwentts
 "$SERVICE_DIR/compose.sh" up -d --no-build --pull never qwentts qwentts-gateway
