@@ -1223,6 +1223,12 @@ sequence. With the clamp enabled, autoregressive generation itself is perturbed
 enough to terminate after only five frames. That is stronger evidence of a
 model-execution correctness problem than a downstream WAV/codec problem.
 
+A follow-up run of the same FA-off / clamp-on case with seed 43 produced
+garbled speech rather than the seed-42 early EOS. This reinforces that seed 42
+is a particular failure manifestation (likely sampling EOS from corrupted
+logits), while the underlying correctness failure is clamp-dependent rather
+than seed-dependent.
+
 #### Corrections to earlier interpretations
 
 Several earlier conclusions must be narrowed in light of this matrix:
@@ -1269,3 +1275,113 @@ and the five-frame premature-EOS log above.
 The qwentts Q8 path is therefore back to being the preferred fast backend for
 `Ooo`, provided `CLAMP_FP16` remains disabled and human-listenable samples are
 kept as part of future deployment validation.
+
+### 2026-10-04 — Q8 1.7B CustomVoice fits Pascal and costs only ~15% RTF versus 0.6B
+
+After the clamp-off Pascal configuration was established as correct, the
+quantized qwentts deployment was extended to the larger Qwen3-TTS 1.7B
+CustomVoice talker. The purpose of this experiment was to answer two practical
+questions for the Android reader deployment:
+
+1. Does the Q8 1.7B CustomVoice model fit and run correctly on an 11 GB GTX
+   1080 Ti?
+2. If it does, how much throughput does it give up relative to the already
+   validated 0.6B Q8 deployment?
+
+The 1.7B Q8 model loaded and generated correctly on `Ooo` using the same shared
+Q8 codec and the validated Pascal runtime settings:
+
+```text
+qwen-talker-1.7b-customvoice-Q8_0.gguf
+qwen-tokenizer-12hz-Q8_0.gguf
+TTS_QWENTTS_NO_FA=0
+TTS_QWENTTS_CLAMP_FP16=0
+```
+
+This establishes that the quantized 1.7B CustomVoice model is operationally
+compatible with the GTX 1080 Ti deployment. No out-of-memory failure occurred
+in the tested reader-sized workload.
+
+#### Controlled remote 0.6B versus 1.7B comparison
+
+The comparison was run from `toothbrush` against the raw qwentts endpoint on
+`Ooo` (`:11436`), so it includes ordinary LAN request/response overhead but
+excludes the MP3 gateway/transcode. Both models used the same benchmark helper,
+Ryan voice, English language, the same lecture paragraph, fixed seed, one
+unmeasured warmup request, and five measured requests. The warmup was excluded
+from the summary.
+
+The generated audio duration was deterministic within each model but differed
+between models despite the otherwise matching request. Therefore RTF is the
+primary throughput comparison rather than wall time alone.
+
+Raw 1.7B measurements:
+
+| Run | Wall (s) | Audio (s) | RTF |
+| ---: | ---: | ---: | ---: |
+| 1 | 6.134 | 22.240 | 0.2758 |
+| 2 | 6.122 | 22.240 | 0.2753 |
+| 3 | 6.124 | 22.240 | 0.2754 |
+| 4 | 6.109 | 22.240 | 0.2747 |
+| 5 | 6.154 | 22.240 | 0.2767 |
+
+1.7B summary:
+
+```text
+mean wall:    6.129 s
+median wall:  6.124 s
+mean audio:  22.240 s
+mean RTF:     0.2756
+median RTF:   0.2753
+throughput:   3.63x realtime
+```
+
+Raw 0.6B measurements from the same harness:
+
+| Run | Wall (s) | Audio (s) | RTF |
+| ---: | ---: | ---: | ---: |
+| 1 | 4.802 | 20.080 | 0.2391 |
+| 2 | 4.948 | 20.080 | 0.2464 |
+| 3 | 4.767 | 20.080 | 0.2374 |
+| 4 | 4.777 | 20.080 | 0.2379 |
+| 5 | 4.781 | 20.080 | 0.2381 |
+
+0.6B summary:
+
+```text
+mean wall:    4.815 s
+median wall:  4.781 s
+mean audio:  20.080 s
+mean RTF:     0.2398
+median RTF:   0.2381
+throughput:   4.17x realtime
+```
+
+Direct normalized comparison:
+
+```text
+0.6B mean RTF:          0.2398
+1.7B mean RTF:          0.2756
+1.7B / 0.6B RTF ratio:  1.15x
+1.7B RTF slowdown:      14.9%
+```
+
+The mean wall time increased from 4.815 s to 6.129 s, about 27%, but that is not
+the right standalone performance conclusion because the 1.7B request generated
+22.24 seconds of audio versus 20.08 seconds for 0.6B. Normalizing by generated
+audio duration shows the larger model is only about 14.9% slower in this
+workload.
+
+#### Deployment interpretation
+
+The larger Q8 model remains comfortably faster than real time on the GTX 1080
+Ti: approximately 3.63x realtime versus 4.17x for 0.6B. That leaves substantial
+prefetch margin for the long-form Android reader. The 1.7B model is therefore a
+practical deployment option rather than merely a model that happens to fit in
+VRAM.
+
+Do not infer a quality win from this timing experiment alone. Ryan/Aiden voice
+quality and preference should be judged separately with retained listen-gate
+samples. From a throughput and compatibility perspective, however, the 1.7B
+Q8 model is viable enough that model choice can be based primarily on audible
+quality rather than GTX 1080 Ti performance constraints.
