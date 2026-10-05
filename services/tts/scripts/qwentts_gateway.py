@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import wave
@@ -32,6 +33,8 @@ PORT = int(os.environ.get("QWENTTS_GATEWAY_PORT", "11437"))
 RETRIES = int(os.environ.get("QWENTTS_GATEWAY_RETRIES", "2"))
 TIMEOUT = float(os.environ.get("QWENTTS_GATEWAY_UPSTREAM_TIMEOUT", "240"))
 MP3_BITRATE_KBPS = int(os.environ.get("QWENTTS_MP3_BITRATE_KBPS", "64"))
+RECOVERY_TIMEOUT = float(os.environ.get("QWENTTS_GATEWAY_RECOVERY_TIMEOUT", "90"))
+RECOVERY_POLL_INTERVAL = float(os.environ.get("QWENTTS_GATEWAY_RECOVERY_POLL_INTERVAL", "1"))
 MAX_BODY = 4 * 1024 * 1024
 
 
@@ -49,6 +52,29 @@ def _request_upstream(method: str, path: str, body: bytes | None = None) -> tupl
             return response.status, dict(response.headers.items()), response.read()
     except urllib.error.HTTPError as ex:
         return ex.code, dict(ex.headers.items()), ex.read()
+
+
+def _wait_for_upstream_health(timeout: float = RECOVERY_TIMEOUT) -> tuple[bool, str]:
+    """Wait for qwentts to become healthy after a crash/restart.
+
+    Docker already restarts the qwentts container.  A model reload can take
+    tens of seconds, so synthesis retries must wait for that recovery instead
+    of consuming every retry while the upstream port is still closed.
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    last_reason = "upstream has not been checked"
+    while True:
+        try:
+            status, _headers, body = _request_upstream("GET", "/health")
+            if 200 <= status < 300:
+                return True, "upstream healthy"
+            last_reason = f"health HTTP {status}: {body[:200].decode('utf-8', errors='replace')}"
+        except Exception as ex:
+            last_reason = f"health transport error: {ex}"
+
+        if time.monotonic() >= deadline:
+            return False, last_reason
+        time.sleep(max(0.1, RECOVERY_POLL_INTERVAL))
 
 
 def _wav_duration_seconds(data: bytes) -> float:
@@ -188,44 +214,59 @@ class GatewayHandler(BaseHTTPRequestHandler):
             try:
                 status, headers, wav_data = _request_upstream("POST", "/v1/audio/speech", upstream_body)
             except Exception as ex:
+                status = 0
+                headers = {}
+                wav_data = b""
                 last_reason = f"transport error: {ex}"
                 self.log_message("speech attempt %d/%d failed: %s", attempt, attempts, last_reason)
-                continue
-
-            if 200 <= status < 300:
-                plausible, reason = _wav_is_plausible(wav_data, text)
-                if plausible:
-                    try:
-                        if requested_format == "mp3":
-                            encoded = _wav_to_mp3(wav_data)
-                            self.log_message(
-                                "speech attempt %d/%d succeeded: %s -> %d-byte MP3 @ %dk",
-                                attempt,
-                                attempts,
-                                reason,
-                                len(encoded),
-                                MP3_BITRATE_KBPS,
-                            )
-                            self._send(HTTPStatus.OK, encoded, "audio/mpeg")
-                        else:
-                            self.log_message("speech attempt %d/%d succeeded: %s", attempt, attempts, reason)
-                            self._send(HTTPStatus.OK, wav_data, "audio/wav")
+            else:
+                if 200 <= status < 300:
+                    plausible, reason = _wav_is_plausible(wav_data, text)
+                    if plausible:
+                        try:
+                            if requested_format == "mp3":
+                                encoded = _wav_to_mp3(wav_data)
+                                self.log_message(
+                                    "speech attempt %d/%d succeeded: %s -> %d-byte MP3 @ %dk",
+                                    attempt,
+                                    attempts,
+                                    reason,
+                                    len(encoded),
+                                    MP3_BITRATE_KBPS,
+                                )
+                                self._send(HTTPStatus.OK, encoded, "audio/mpeg")
+                            else:
+                                self.log_message("speech attempt %d/%d succeeded: %s", attempt, attempts, reason)
+                                self._send(HTTPStatus.OK, wav_data, "audio/wav")
+                            return
+                        except Exception as ex:
+                            self._send_json_error(HTTPStatus.BAD_GATEWAY, str(ex))
+                            return
+                    last_reason = reason
+                    self.log_message("speech attempt %d/%d rejected: %s", attempt, attempts, reason)
+                else:
+                    content_type = headers.get("Content-Type", "application/octet-stream")
+                    last_reason = f"upstream HTTP {status}: {wav_data[:300].decode('utf-8', errors='replace')}"
+                    self.log_message("speech attempt %d/%d failed: %s", attempt, attempts, last_reason)
+                    if 0 < status < 500:
+                        # Client/model/voice errors are deterministic and should be
+                        # surfaced immediately rather than retried.
+                        self._send(status, wav_data, content_type.split(";", 1)[0])
                         return
-                    except Exception as ex:
-                        self._send_json_error(HTTPStatus.BAD_GATEWAY, str(ex))
-                        return
-                last_reason = reason
-                self.log_message("speech attempt %d/%d rejected: %s", attempt, attempts, reason)
-                continue
 
-            content_type = headers.get("Content-Type", "application/octet-stream")
-            last_reason = f"upstream HTTP {status}: {wav_data[:300].decode('utf-8', errors='replace')}"
-            self.log_message("speech attempt %d/%d failed: %s", attempt, attempts, last_reason)
-            if status < 500:
-                # Client/model/voice errors are deterministic and should be
-                # surfaced immediately rather than retried.
-                self._send(status, wav_data, content_type.split(";", 1)[0])
-                return
+            if attempt < attempts:
+                self.log_message(
+                    "waiting up to %.0fs for qwentts recovery before attempt %d/%d",
+                    RECOVERY_TIMEOUT,
+                    attempt + 1,
+                    attempts,
+                )
+                recovered, recovery_reason = _wait_for_upstream_health()
+                if not recovered:
+                    last_reason = f"{last_reason}; recovery timed out: {recovery_reason}"
+                    self.log_message("qwentts recovery failed: %s", recovery_reason)
+                    break
+                self.log_message("qwentts recovered; retrying synthesis")
 
         self._send_json_error(
             HTTPStatus.BAD_GATEWAY,
@@ -238,9 +279,14 @@ def main() -> None:
         raise SystemExit("QWENTTS_GATEWAY_RETRIES must be >= 0")
     if MP3_BITRATE_KBPS < 16:
         raise SystemExit("QWENTTS_MP3_BITRATE_KBPS must be >= 16")
+    if RECOVERY_TIMEOUT < 0:
+        raise SystemExit("QWENTTS_GATEWAY_RECOVERY_TIMEOUT must be >= 0")
+    if RECOVERY_POLL_INTERVAL <= 0:
+        raise SystemExit("QWENTTS_GATEWAY_RECOVERY_POLL_INTERVAL must be > 0")
     print(
         f"qwentts gateway listening on {HOST}:{PORT}; upstream={UPSTREAM}; "
-        f"retries={RETRIES}; mp3={MP3_BITRATE_KBPS}k",
+        f"retries={RETRIES}; recovery_timeout={RECOVERY_TIMEOUT:.0f}s; "
+        f"mp3={MP3_BITRATE_KBPS}k",
         flush=True,
     )
     server = ThreadingHTTPServer((HOST, PORT), GatewayHandler)
