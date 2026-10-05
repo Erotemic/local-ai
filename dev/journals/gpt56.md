@@ -1137,3 +1137,135 @@ Do not use the earlier GTX 1080 Ti Q8 throughput numbers as evidence that the
 backend is deployable. They remain useful performance measurements for a broken
 quality path. Any future TTS benchmark intended to support a deployment decision
 must pair mechanical validity with an explicit retained human-listenable sample.
+
+### 2026-10-04 — Controlled Pascal matrix isolates `CLAMP_FP16` as the qwentts corruption trigger
+
+The provisional diagnosis above that the qwentts.cpp CUDA path was generally
+incorrect on Pascal was overturned by a controlled follow-up. The same qwentts
+CUDA-12 image, same Q8 GGUF pair, and same GTX 1080 Ti can produce clean,
+intelligible speech. The reproducible failure is specifically associated with
+`CLAMP_FP16=1`.
+
+First, the floating `:cuda12` image tag was ruled out as a source of
+cross-machine drift. `Ooo` (GTX 1080 Ti) and `toothbrush` (RTX 3090) were both
+running the exact same image:
+
+```text
+image id:
+sha256:52f7faf81063137a500cf3f92d6da01306a5cb22e2deaf3562b88eaacfc3d8fb
+
+repo digest:
+ghcr.io/serveurpersocom/qwentts.cpp@sha256:01cfb156657b009c5514d83988f8c633faa78b99dc72e1a6f8df1f5c042fbc2a
+```
+
+The exact same Q8 files had already produced good Ryan audio on the RTX 3090:
+
+```text
+qwen-talker-0.6b-customvoice-Q8_0.gguf
+qwen-tokenizer-12hz-Q8_0.gguf
+```
+
+A standalone GTX 1080 Ti run using `fa=on`, `clamp_fp16=off`, and an explicit
+`GGML_CUDA_DISABLE_GRAPHS=1` also produced correct speech. Its log reported:
+
+```text
+Device 0: NVIDIA GeForce GTX 1080 Ti, compute capability 6.1
+[GGML] ggml_cuda_graph_set_enabled: disabling CUDA graphs due to GPU architecture
+[Pipeline] Loaded: ... fa=on clamp_fp16=off ...
+[Perf] Total 5379.2 ms ... audio 22.56 s, RTF 0.238
+```
+
+The same configuration then worked through the normal local-ai lifecycle, so
+the standalone container was not bypassing a local-ai correctness problem.
+Because ggml automatically disables CUDA graphs on this GPU architecture,
+`GGML_CUDA_DISABLE_GRAPHS=1` was not the meaningful difference.
+
+#### Clean 2x2 `NO_FA` / `CLAMP_FP16` matrix
+
+The two runtime knobs were then tested as a complete 2x2 matrix on `Ooo`. Each
+case used a fresh qwentts container, the same Q8 talker and codec, the same Ryan
+paragraph, and fixed seeds 42 and 1234. The results were listened to directly as
+raw WAVs so the Android app, gateway, MP3 transcode, and network transport were
+not part of the judgment.
+
+| Case | Flash attention | `CLAMP_FP16` | Seed 42 | Seed 1234 |
+| --- | --- | --- | --- | --- |
+| A | on | off | good | good |
+| B | on | on | bad / garbled | bad / garbled |
+| C | off | off | good | good |
+| D | off | on | effectively empty / silent | bad / garbled |
+
+This matrix is the key result. Disabling flash attention by itself does **not**
+corrupt output. Enabling `CLAMP_FP16` corrupts output with flash attention either
+on or off. Therefore the best-supported diagnosis is:
+
+```text
+CLAMP_FP16=0  -> correct audio on GTX 1080 Ti
+CLAMP_FP16=1  -> incorrect audio on GTX 1080 Ti
+NO_FA alone   -> not a correctness problem in this test
+```
+
+The `D` / seed-42 failure was repeated once more because it initially looked
+like a zero-duration artifact. It reproduced. The server did begin generation,
+but sampled EOS almost immediately:
+
+```text
+[Prompt] Built: 62 ids, N_text=54, N_instruct=0, T_ctx=65, ...
+[Sample] step=0 c0=1995 ...
+[Sample] step=1 c0=1100 ...
+[Pipeline] EOS at step 5, stopping (slot 0)
+[Pipeline] Generation done : 5 frames
+[Perf] Total 127.5 ms (5 frames, 19.03 ms/frame AR, audio 0.40 s, RTF 0.319)
+```
+
+So this case is not merely a codec producing silence from an otherwise normal
+sequence. With the clamp enabled, autoregressive generation itself is perturbed
+enough to terminate after only five frames. That is stronger evidence of a
+model-execution correctness problem than a downstream WAV/codec problem.
+
+#### Corrections to earlier interpretations
+
+Several earlier conclusions must be narrowed in light of this matrix:
+
+1. **qwentts.cpp is not generally broken on Pascal.** Q8/Q8 produces good audio
+   on a GTX 1080 Ti when `CLAMP_FP16=0`.
+2. **The Q8 artifacts are not bad.** The same files work on both RTX 3090 and
+   GTX 1080 Ti under a correct runtime configuration.
+3. **Flash attention is not required for correctness.** Both FA-on and FA-off
+   cases were good with clamping disabled.
+4. **The previous qwentts F32/Pascal failure does not establish an F32 bug.**
+   That experiment was performed with the now-known-bad clamp-enabled
+   configuration. There is no reason to repeat F32 unless a separate F32
+   question becomes important.
+5. **CUDA graphs are not the culprit.** ggml already disables them automatically
+   on the GTX 1080 Ti architecture.
+6. The earlier Q8 benchmark at roughly 0.244 repeat RTF remains a useful
+   throughput observation, but its clamp-enabled audio was not deployment
+   quality. A later correct-audio standalone run measured RTF 0.238 for a
+   22.56-second sample, demonstrating that the desired faster-than-real-time
+   performance survives with the correct runtime settings.
+
+#### Operational setting and upstream significance
+
+For the GTX 1080 Ti deployment, the validated qwentts settings are now:
+
+```text
+TTS_QWENTTS_NO_FA=0
+TTS_QWENTTS_CLAMP_FP16=0
+```
+
+`NO_FA=1` also produced correct audio with clamping disabled, but there is no
+current reason to disable the normal flash-attention path. The production
+preference is therefore FA on, clamp off.
+
+This is a useful upstream correctness finding because `CLAMP_FP16` is intended
+as a guard for FP16 numerical range on older/sub-Ampere CUDA hardware, yet on
+this Pascal card enabling it reproducibly makes generation wrong. The failure
+is not merely lower subjective quality: it can cause severe garbling and, for a
+fixed seed, premature EOS after five frames. If reported upstream, include the
+2x2 matrix, exact image digest, model filenames, GPU model/compute capability,
+and the five-frame premature-EOS log above.
+
+The qwentts Q8 path is therefore back to being the preferred fast backend for
+`Ooo`, provided `CLAMP_FP16` remains disabled and human-listenable samples are
+kept as part of future deployment validation.
