@@ -18,10 +18,22 @@ set +a
 backend="${TTS_ACTIVE_BACKEND:-qwentts}"
 bind="${TTS_BIND_ADDRESS:-127.0.0.1}"
 case "$backend" in
-  qwentts) port="${TTS_QWENTTS_GATEWAY_PORT:-11437}"; container="ai-voice-qwentts-gateway" ;;
-  wavhost) port="${TTS_WAVHOST_PORT:-11435}"; container="ai-voice-wavhost" ;;
-  kokoro) port="${TTS_KOKORO_PORT:-8880}"; container="ai-voice-kokoro" ;;
-  *) echo "ERROR: invalid TTS_ACTIVE_BACKEND=$backend" >&2; exit 2 ;;
+  qwentts)
+    port="${TTS_QWENTTS_GATEWAY_PORT:-11437}"
+    container="ai-voice-qwentts-gateway"
+    ;;
+  kokoro-gpu)
+    port="${TTS_KOKORO_GPU_PORT:-8880}"
+    container="ai-voice-kokoro-gpu"
+    ;;
+  kokoro-cpu)
+    port="${TTS_KOKORO_CPU_PORT:-8881}"
+    container="ai-voice-kokoro-cpu"
+    ;;
+  *)
+    echo "ERROR: invalid TTS_ACTIVE_BACKEND=$backend" >&2
+    exit 2
+    ;;
 esac
 
 local_host="$bind"

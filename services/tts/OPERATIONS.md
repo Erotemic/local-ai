@@ -1,38 +1,38 @@
 # TTS operations
 
-The service exposes three OpenAI-compatible TTS backends. Operationally, run one
-at a time with `./start.sh`; the direct `start-*.sh` scripts remain available
-for benchmark work.
+The operational choices are deliberately explicit:
 
-## Normal server mode: quantized Qwen on a GTX 1080 Ti
-
-Provision the Q8 model and runtime once:
-
-```bash
-./setup.sh --accept-defaults --with-model qwen-0.6-customvoice-q8-gguf
+```text
+qwentts     quantized Qwen3-TTS on NVIDIA CUDA
+kokoro-gpu  Kokoro-FastAPI on the selected NVIDIA GPU
+kokoro-cpu  Kokoro-FastAPI without an NVIDIA dependency
 ```
 
-For a server that must accept Android clients on the trusted LAN, edit
-`services/tts/.env` and set:
+Normal `./start.sh` operation runs one backend at a time and stops the others.
+
+## Normal server mode: qwentts
+
+For the GTX 1080 Ti server, keep:
 
 ```dotenv
 TTS_ACTIVE_BACKEND=qwentts
 TTS_BIND_ADDRESS=0.0.0.0
+TTS_QWENTTS_GPU=1
+TTS_QWENTTS_CLAMP_FP16=0
+TTS_QWENTTS_NO_FA=0
 ```
 
-Then start the configured backend exclusively:
+Then:
 
 ```bash
 ./start.sh
 ./status.sh
 ```
 
-`./start.sh` stops the other TTS containers before starting qwentts. The raw Q8 engine remains on port `11436`. Normal Android clients should use
-the local-ai gateway on port `11437`; `./status.sh` reports that client URL and
-queries `/health` and `/v1/models` through the gateway.
+The raw qwentts engine is on port `11436`; normal clients should use the MP3 +
+retry gateway on `11437`.
 
-The Android reader should use the gateway LAN URL, not `127.0.0.1`. For the
-default deployment configure it with:
+For the Android reader with the default 0.6B model:
 
 ```text
 server: http://<server-lan-ip>:11437
@@ -41,73 +41,73 @@ voice:  ryan
 format: mp3
 ```
 
-The gateway proxies discovery endpoints from qwentts, converts qwentts WAV to
-64 kbps MP3 by default, and retries transient 5xx/empty-or-near-empty generation
-results up to `TTS_QWENTTS_GATEWAY_RETRIES` times. The raw engine on `11436` is
-still available for debugging and benchmark comparison.
+## Switch to Kokoro GPU
 
-The endpoint is unauthenticated HTTP. Bind to `0.0.0.0` only on a trusted LAN,
-and restrict the port with the host firewall if the machine has untrusted
-network interfaces.
+The pinned GPU image is:
 
-## Switching backends
+```text
+ghcr.io/remsky/kokoro-fastapi-gpu:v0.3.0-amd64
+```
 
-Persist a choice in `.env`:
+Persist:
 
 ```dotenv
-TTS_ACTIVE_BACKEND=wavhost
+TTS_ACTIVE_BACKEND=kokoro-gpu
+```
+
+or use a one-shot selection:
+
+```bash
+TTS_ACTIVE_BACKEND=kokoro-gpu ./start.sh
+```
+
+Default client port: `8880`.
+
+## Switch to Kokoro CPU
+
+The pinned CPU image is:
+
+```text
+ghcr.io/remsky/kokoro-fastapi-cpu:v0.3.0-amd64
+```
+
+Persist:
+
+```dotenv
+TTS_ACTIVE_BACKEND=kokoro-cpu
 ```
 
 or:
 
-```dotenv
-TTS_ACTIVE_BACKEND=kokoro
-```
-
-Then run:
-
 ```bash
-./start.sh
+TTS_ACTIVE_BACKEND=kokoro-cpu ./start.sh
 ```
 
-For a one-off switch without editing `.env`:
+Default client port: `8881`.
 
-```bash
-TTS_ACTIVE_BACKEND=kokoro ./start.sh
-```
+## Direct comparison starts
 
-Ports remain backend-specific so side-by-side benchmark runs are still possible:
-
-```text
-qwentts.cpp raw Q8      11436
-qwentts MP3 gateway     11437
-Wavhost                 11435
-Kokoro-FastAPI           8880
-```
-
-A stable public port or remote control plane can be added later if the Android
-client needs server-side switching. It is intentionally not required for the
-current URL-driven client workflow.
-
-## Direct backend starts
-
-These do not stop the other TTS containers and are primarily useful for testing:
+These do not stop the other runtimes and are intended for controlled tests:
 
 ```bash
 ./start-qwentts.sh
-./start-wavhost.sh
-./start-kokoro.sh
+./start-kokoro-gpu.sh
+./start-kokoro-cpu.sh
 ```
 
-## Kokoro paths in Wavhost
+Because the two Kokoro variants use ports 8880 and 8881 they can be measured
+side-by-side. qwentts raw benchmarking uses port 11436.
 
-Kokoro's Wavhost registry namespace is `hexgrad`, so the canonical paths are:
+## Benchmarks
 
-```text
-{TTS_DATA_ROOT}/wavhost/.wavhost/models/manifests/registry/hexgrad/kokoro/latest
-/state/.wavhost/models/checkpoints/hexgrad/kokoro/latest
+```bash
+./scripts/benchmark.sh qwentts 5
+./scripts/benchmark.sh kokoro-gpu 5
+./scripts/benchmark.sh kokoro-cpu 5
 ```
 
-The older `registry/kokoro/kokoro` / `checkpoints/kokoro/kokoro` paths are
-incorrect and cause local-ai to mis-detect an otherwise successfully pulled
-model.
+## Security
+
+All three servers are unauthenticated HTTP services. `127.0.0.1` is the safe
+default. Bind to `0.0.0.0` only on a trusted LAN/VPN and restrict the exposed
+ports with the host firewall when other interfaces are untrusted.

@@ -9,20 +9,21 @@ helper makes first-run configuration and persistent storage explicit.
 
 ## Services
 
-| Service | Purpose | Default UI |
+| Service | Purpose | Default UI/API |
 | --- | --- | --- |
 | `comfyui` | General ComfyUI installation; model bundles are optional | `http://127.0.0.1:8188` |
 | `ace-step` | ACE-Step music/audio generation | `http://127.0.0.1:7860` |
 | `triposplat` | Single-image 3D Gaussian reconstruction | `http://127.0.0.1:7861` |
-| `tts` | Local TTS: Wavhost/Qwen experiment + Kokoro GPU baseline | `http://127.0.0.1:11435` |
+| `tts` | Local TTS: quantized Qwen plus GPU/CPU Kokoro choices | `http://127.0.0.1:11437` |
 
 `infer-stack` is intentionally not included yet. It can become another service
 later without changing this repository's role.
 
-The `tts` service builds Wavhost from `submodules/wavhost`, so local fork fixes
-can be tested in the same reproducible service recipe before being contributed
-upstream. It keeps the existing Kokoro-FastAPI GPU image available separately
-for performance and quality comparisons.
+The `tts` service deliberately talks to the selected inference runtimes
+directly. qwentts.cpp provides the fast quantized Qwen path, while pinned
+Kokoro-FastAPI GPU and CPU images provide simple alternative backends. The
+qwentts client gateway is a small local Python + ffmpeg image used only for MP3
+transport, plausibility checks, and retries.
 
 ## Normal workflow
 
@@ -44,12 +45,12 @@ On first use, `setup.sh`:
 4. resolves and prints the exact host paths, model destinations, port, and GPU;
 5. creates the service directories;
 6. validates Docker, Compose, and NVIDIA prerequisites;
-7. builds the service image;
-8. provisions required model weights and verifies their expected layout;
+7. builds any service-local image required by the recipe;
+8. provisions required/selected model weights and verifies their expected layout;
 9. exits without starting the service.
 
-`start.sh` never creates configuration, downloads weights, or builds images. If
-setup is incomplete it stops and tells you to run `./setup.sh`.
+`start.sh` never creates configuration or downloads model weights. If setup is
+incomplete it stops and tells you to run `./setup.sh`.
 
 Re-run configuration editing explicitly with:
 
@@ -69,7 +70,7 @@ Large data never lives in Git. The machine-wide defaults are configured once in
 `local-ai/.env`:
 
 ```text
-/data/services/hf-repos/        canonical explicitly downloaded model repos
+/data/services/hf-repos/         canonical explicitly downloaded model repos
 /data/services/local-ai/         private mutable service state
 /data/services/local-ai/workspaces/ intentionally shared project data
 ```
@@ -95,10 +96,7 @@ The default concrete service tree is:
 ├── triposplat/
 │   └── outputs/
 ├── tts/
-│   ├── benchmarks/     # retained TTS benchmark audio + metadata
-│   └── wavhost/
-│       ├── .wavhost/   # content-addressed Wavhost models/voices
-│       └── cache/      # disposable HF/Torch/application cache
+│   └── benchmarks/       # retained TTS benchmark audio + metadata
 └── workspaces/
 ```
 
@@ -108,8 +106,10 @@ Canonical externally downloaded model repositories stay separate:
 /data/services/hf-repos/
 ├── Comfy-Org/
 │   └── MiniMax-H3/          # optional ComfyUI bundle
+├── Serveurperso/
+│   └── Qwen3-TTS-GGUF/      # qwentts talker + codec GGUFs
 └── VAST-AI/
-    └── TripoSplat/          # required TripoSplat weights
+    └── TripoSplat/           # required TripoSplat weights
 ```
 
 ACE-Step uses its explicit `models/` tree because upstream provides an
@@ -120,7 +120,7 @@ See `docs/data-layout.md` for the retention and sharing rules.
 
 ## Model provisioning
 
-Required models are part of `./setup.sh`.
+Required and selected models are part of `./setup.sh`.
 
 TripoSplat therefore needs only:
 
@@ -142,6 +142,14 @@ or for one setup invocation:
 
 ```bash
 ./setup.sh --with-model minimax-h3
+```
+
+TTS defaults to the qwentts 0.6B Q8 bundle and can additionally provision the
+1.7B talker:
+
+```bash
+cd services/tts
+./setup.sh --with-model qwen-1.7-customvoice-q8-gguf
 ```
 
 Low-level model commands remain available for repair/maintenance, but refuse to
@@ -190,10 +198,10 @@ From the repository root, inspect all configured services with:
 ## Engineering journal
 
 Durable experiment measurements, failed approaches, and tentative conclusions
-live under `dev/journals/`. See `dev/journals/gpt56.md` for the Qwen3-TTS /
-Wavhost GPU experiments and quantization follow-up plan. These notes are
-intentionally rawer than the user-facing service documentation so future
-maintainers can avoid repeating expensive experiments.
+live under `dev/journals/`. See `dev/journals/gpt56.md` for the Qwen3-TTS GPU,
+Pascal compatibility, and quantization experiments. These notes are intentionally
+rawer than the user-facing service documentation so future maintainers can avoid
+repeating expensive experiments.
 
 ## Repository policy
 

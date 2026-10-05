@@ -1,53 +1,6 @@
 services:
-  wavhost:
-    build:
-      context: ../..
-      dockerfile: services/tts/Dockerfile
-      args:
-        TORCH_VERSION: ${TTS_TORCH_VERSION:-2.14.0}
-        TORCHAUDIO_VERSION: ${TTS_TORCHAUDIO_VERSION:-2.11.0}
-        TORCH_CUDA_TAG: ${TTS_TORCH_CUDA_TAG:-cu126}
-        QWEN_TTS_VERSION: ${TTS_QWEN_TTS_VERSION:-0.1.1}
-    image: ${TTS_WAVHOST_IMAGE:-local/wavhost:pascal}
-    container_name: ai-voice-wavhost
-    restart: unless-stopped
-    ports:
-      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_WAVHOST_PORT:-11435}:11435"
-    environment:
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      HOME: /state
-      HF_HOME: /state/cache/huggingface
-      TORCH_HOME: /state/cache/torch
-      XDG_CACHE_HOME: /state/cache
-      WAVHOST_DEVICE: ${WAVHOST_DEVICE:-cuda}
-      WAVHOST_QWEN_DTYPE: ${WAVHOST_QWEN_DTYPE:-auto}
-      WAVHOST_BACKEND_CACHE_SIZE: ${WAVHOST_BACKEND_CACHE_SIZE:-1}
-      PYTHONUNBUFFERED: "1"
-    volumes:
-      - ${TTS_DATA_ROOT:?run ./setup.sh and use ./compose.sh}/wavhost:/state:rw
-    command:
-      - wavhost
-      - serve
-      - --host
-      - 0.0.0.0
-      - --port
-      - "11435"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:11435/health', timeout=3).read()"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["${TTS_WAVHOST_GPU:-1}"]
-              capabilities: ["gpu"]
-
-  # Raw quantized inference engine. Keep this endpoint available for direct
-  # benchmark/debug use; normal Android clients use qwentts-gateway below.
+  # Raw quantized Qwen3-TTS inference engine. Normal clients should use the
+  # gateway below for MP3 transport and bounded retries.
   qwentts:
     image: ${TTS_QWENTTS_IMAGE:-ghcr.io/serveurpersocom/qwentts.cpp:cuda12}
     container_name: ai-voice-qwentts
@@ -80,11 +33,14 @@ services:
               device_ids: ["${TTS_QWENTTS_GPU:-1}"]
               capabilities: ["gpu"]
 
-  # Client-facing deployment shim: discovery proxy + bounded qwentts retries +
-  # WAV->MP3 conversion. It reuses the already-built Wavhost image for Python
-  # and ffmpeg, but does not invoke Wavhost inference.
+  # Client-facing deployment shim for qwentts: discovery proxy, bounded
+  # synthesis retries, plausibility checks, and WAV -> MP3 conversion.
+  # This image is intentionally tiny and independent of any TTS runtime.
   qwentts-gateway:
-    image: ${TTS_WAVHOST_IMAGE:-local/wavhost:pascal}
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    image: ${TTS_QWENTTS_GATEWAY_IMAGE:-local/qwentts-gateway:py313}
     container_name: ai-voice-qwentts-gateway
     restart: unless-stopped
     depends_on:
@@ -110,17 +66,25 @@ services:
       retries: 3
       start_period: 5s
 
-  kokoro:
-    image: ${TTS_KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.3.0-amd64}
-    container_name: ai-voice-kokoro
+  # Known-good Pascal path. The v0.3.0 amd64 CUDA image is intentionally pinned:
+  # this exact image has been verified on the GTX 1080 Ti deployment host.
+  kokoro-gpu:
+    image: ${TTS_KOKORO_GPU_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.3.0-amd64}
+    container_name: ai-voice-kokoro-gpu
     restart: unless-stopped
     ports:
-      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_KOKORO_PORT:-8880}:8880"
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_KOKORO_GPU_PORT:-8880}:8880"
     environment:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       PYTHONUNBUFFERED: "1"
       API_LOG_LEVEL: INFO
       TZ: ${TZ:-Etc/UTC}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8880/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     deploy:
       resources:
         reservations:
@@ -128,3 +92,22 @@ services:
             - driver: nvidia
               device_ids: ["${TTS_KOKORO_GPU:-0}"]
               capabilities: ["gpu"]
+
+  # Portable CPU-only Kokoro option. It deliberately has no NVIDIA device
+  # reservation so it can be used on machines without a GPU runtime.
+  kokoro-cpu:
+    image: ${TTS_KOKORO_CPU_IMAGE:-ghcr.io/remsky/kokoro-fastapi-cpu:v0.3.0-amd64}
+    container_name: ai-voice-kokoro-cpu
+    restart: unless-stopped
+    ports:
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_KOKORO_CPU_PORT:-8881}:8880"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      API_LOG_LEVEL: INFO
+      TZ: ${TZ:-Etc/UTC}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8880/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

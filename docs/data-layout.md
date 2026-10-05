@@ -30,7 +30,7 @@ Use this for explicitly provisioned Hugging Face repositories that are useful
 outside one application's private cache. Services normally mount these trees
 read-only.
 
-Current declared repositories:
+Current declared repositories include:
 
 ```text
 /data/services/hf-repos/
@@ -39,6 +39,11 @@ Current declared repositories:
 │       ├── diffusion_models/
 │       ├── text_encoders/
 │       └── vae/
+├── Serveurperso/
+│   └── Qwen3-TTS-GGUF/
+│       ├── qwen-talker-0.6b-customvoice-Q8_0.gguf
+│       ├── qwen-talker-1.7b-customvoice-Q8_0.gguf   # optional
+│       └── qwen-tokenizer-12hz-Q8_0.gguf
 └── VAST-AI/
     └── TripoSplat/
         ├── diffusion_models/
@@ -84,10 +89,7 @@ Concrete layout:
 │   └── outputs/             # generated .ply/.splat assets
 │
 └── tts/
-    ├── benchmarks/          # retained benchmark WAVs + metadata/timings
-    └── wavhost/
-        ├── .wavhost/        # model blobs/manifests/checkpoints + saved voices
-        └── cache/           # disposable HF/Torch/application cache
+    └── benchmarks/          # retained WAVs + request/metadata/timing results
 ```
 
 ACE-Step previously lived at `/data/service/docker/ace-step`. To reuse that
@@ -101,14 +103,15 @@ ACESTEP_DATA_ROOT=/data/service/docker/ace-step
 Other services can likewise override their `*_DATA_ROOT`, but leaving it blank
 uses the machine-wide `LOCAL_AI_SERVICE_ROOT` convention.
 
-Wavhost model storage is service-owned rather than placed in `HF_REPOS_ROOT`:
-Wavhost intentionally maintains its own content-addressed blob/manifests layout
-and materialized checkpoints. Model weights are reconstructible, while saved
-voice reference audio under the same Wavhost home should be treated as user
-data if voice cloning is used. Benchmark WAVs and their request/timing metadata
-are retained under `tts/benchmarks/` as user-managed experimental outputs. The
-separate Kokoro-FastAPI baseline does not need a host data volume for ordinary
-API synthesis.
+TTS has no private model store. qwentts uses the canonical GGUF repository under
+`HF_REPOS_ROOT`, while the pinned Kokoro-FastAPI images carry/manage the assets
+they need for ordinary synthesis. TTS-private state is therefore limited to
+retained benchmark artifacts.
+
+Older installations may still contain `/data/services/local-ai/tts/wavhost/`
+from the retired Wavhost experiment. Nothing in the current TTS service reads
+that directory; it can be archived or deleted independently once any desired
+historical voice/model data has been recovered.
 
 ## Workspaces
 
