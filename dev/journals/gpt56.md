@@ -925,48 +925,215 @@ resolved `TTS_DATA_ROOT=/data/services/local-ai/tts/tts` and preserved a caller
 `TTS_QWENTTS_CLAMP_FP16=0` override, confirming that direct lifecycle operations
 now agree with setup while retaining experiment overrides.
 
+### 2026-10-04 — Human audio validation overturns the Pascal qwentts deployment conclusion
 
+The earlier qwentts.cpp Q8 timing results on the GTX 1080 Ti were real, but the
+initial benchmark only established throughput and mechanically valid WAV output.
+It did **not** establish intelligible speech. A later explicit human-listening
+gate showed that distinction matters: qwentts can return structurally valid,
+plausibly sized 24 kHz WAVs at excellent RTF while the actual speech is badly
+garbled.
 
-### 2026-10-04 — qwentts Android gateway for MP3 transport and transient retry
+This section supersedes the earlier performance-only inference that the Q8 path
+was ready to serve the Android reader on Pascal. The performance numbers remain
+valid measurements; the deployment conclusion does not.
 
-The validated fast GTX 1080 Ti path is qwentts.cpp Q8_0 directly, not Wavhost.
-The Wavhost submodule at `6a479e3` still has only its PyTorch Qwen backend; no
-qwentts/GGUF integration is present. Direct qwentts generation measured about
-0.244 repeat RTF on the GTX 1080 Ti, but qwentts only exposes WAV/PCM. A 24 kHz
-mono 16-bit WAV is about 48 kB/s (~2.9 MB/min), which is undesirable for long
-Android lectures over a weak LAN link.
+#### Human listening gate and transport isolation
 
-A real repeated Android preflight also observed intermittent qwentts synthesis
-failure after one successful request:
+The Android-side test workflow was extended with an optional listening gate that
+requests a fixed phrase from the real server, writes the returned audio to local
+disk, plays it, and requires explicit human confirmation. This was added because
+HTTP 200, MIME type, WAV/MP3 structure, duration, and file size are insufficient
+quality gates for TTS.
+
+The first `Hello world.` samples from the GTX 1080 Ti qwentts path were complete
+garbled trash. To isolate transport and transcoding, the same request was then
+captured in three forms:
 
 ```text
-HTTP 502
-tts_slot_complete: codec decode returned no audio
+raw qwentts WAV from :11436
+gateway WAV from :11437
+gateway MP3 from :11437
 ```
 
-A previous request had also returned a syntactically valid but implausibly short
-0.16 s WAV for a full sentence. These are inference/runtime reliability failures,
-not server-start or network failures.
+The **raw qwentts WAV was already garbled**, proving the Android app, LAN
+transport, qwentts gateway, and WAV->MP3 transcode were not the source of the
+quality failure.
 
-For immediate operational use, local-ai now runs `qwentts-gateway` alongside the
-raw qwentts container. It is a small stdlib Python HTTP shim running in the
-already-built Wavhost image (which provides ffmpeg) and does not perform
-inference itself. The raw qwentts engine stays on port 11436. The gateway uses
-port 11437 and:
+Short qwentts utterances were also pathological in duration: `Hello world.`
+could produce roughly 30 seconds of junk. A representative paragraph was
+therefore adopted as the quality probe for subsequent comparisons:
 
-- proxies `/health`, `/v1/models`, and voice discovery;
-- forwards `/v1/audio/speech` to qwentts as buffered WAV;
-- returns WAV unchanged when requested;
-- transcodes WAV to 64 kbps MP3 when requested;
-- retries transport/5xx failures;
-- retries a valid WAV when its duration is implausibly short for the input text.
+> Today we are going to talk about how computers represent information. A
+> computer ultimately works with patterns of numbers, but those numbers can
+> represent text, images, music, and even complex simulations. The important
+> idea is that the meaning comes from how we choose to interpret those patterns.
 
-This is a tactical deployment shim. A future Wavhost qwentts backend can absorb
-these responsibilities without changing the Android-facing API. Android should
-use `http://<server>:11437`, model `qwen-0.6-customvoice-q8-ggml`, voice `ryan`,
-and `response_format=mp3`.
+#### Full-precision Wavhost control on GTX 1080 Ti
 
-Gateway logic was exercised against a mock qwentts server with the sequence
-`502 -> 0.10 s WAV -> 2.00 s WAV`. With two retries configured, the gateway
-rejected both bad attempts, transcoded the third result with ffmpeg, and returned
-a valid 24 kHz mono ~64 kbps MP3.
+The known PyTorch/Wavhost path was restored on `Ooo` as a sanity check using:
+
+```text
+model:  qwen-0.6-customvoice
+voice:  Ryan / Aiden
+device: GTX 1080 Ti
+WAVHOST_QWEN_DTYPE=float32
+```
+
+A two-word `Hello world.` sample was intelligible but sounded noticeably poor.
+The longer representative paragraph was much better: **Ryan sounded fine**, and
+**Aiden also sounded fine**. This establishes that the official Qwen model,
+named voices, 1080 Ti, CUDA/PyTorch stack, LAN path, and WAV framing can all
+produce acceptable speech on the same hardware. The poor short-sample behavior
+should therefore not be used by itself as a model-quality verdict.
+
+This also refines an earlier subjective note in this journal: Ryan quality is
+acceptable on realistic paragraph-sized text, not merely on an unspecified
+single sample.
+
+#### Wavhost MP3 packaging defect
+
+While exercising Wavhost as the quality control, MP3 output failed after
+successful synthesis:
+
+```text
+ImportError: TorchCodec is required for save_with_torchcodec.
+RuntimeError: Failed to convert audio to mp3: TorchCodec is required ...
+```
+
+The current Wavhost `AudioConverter` avoids TorchCodec for WAV by using its own
+WAV encoder, but compressed formats still call `torchaudio.save()`. With the
+current TorchAudio build that path requires TorchCodec, which is not installed
+in the local-ai Wavhost image. This is a packaging/conversion defect, separate
+from Qwen synthesis quality. The image already contains `ffmpeg`; a durable fix
+should likely encode compressed formats through ffmpeg rather than adding a
+fragile Torch/TorchAudio/TorchCodec dependency coupling. WAV generation remains
+usable as a control in the meantime.
+
+#### qwentts Q8 on GTX 1080 Ti: runtime knobs did not recover quality
+
+The Q8/Q8 qwentts configuration on `Ooo` used:
+
+```text
+qwen-talker-0.6b-customvoice-Q8_0.gguf
+qwen-tokenizer-12hz-Q8_0.gguf
+GTX 1080 Ti, compute capability 6.1
+```
+
+Several plausible Pascal-specific mitigations were tested and remained garbled:
+
+```text
+flash attention off + clamp_fp16 on                 BAD
+flash attention off + clamp_fp16 on + greedy/seed  BAD
+realistic paragraph instead of Hello world          BAD
+```
+
+The deterministic test set `seed=42`, `temperature=0`, and
+`subtalker_temperature=0`; it still produced junk. This reduces the likelihood
+that the failure is merely stochastic sampling instability.
+
+#### qwentts F32 on GTX 1080 Ti is also garbled
+
+To determine whether the downloaded Q8 artifact or quantization itself was bad,
+the qwentts runtime on the GTX 1080 Ti was switched to the published F32 pair:
+
+```text
+qwen-talker-0.6b-customvoice-F32.gguf
+qwen-tokenizer-12hz-F32.gguf
+```
+
+The F32 qwentts output was also garbage. Therefore this is **not adequately
+explained by Q8 quantization quality**. A different quantization should not be
+assumed to solve the 1080 Ti problem without evidence.
+
+#### Exact Q8 model files work correctly on RTX 3090
+
+The decisive cross-hardware control used the same published Q8 talker and codec
+on an RTX 3090 via the same `ghcr.io/serveurpersocom/qwentts.cpp:cuda12`
+runtime family. The 3090 log reported:
+
+```text
+Device 0: NVIDIA GeForce RTX 3090, compute capability 8.6
+qwen-talker-0.6b-customvoice-Q8_0.gguf
+qwen-tokenizer-12hz-Q8_0.gguf
+fa=on clamp_fp16=off max_batch=1
+```
+
+The representative Ryan paragraph produced a 24 kHz mono WAV of 23.76 seconds
+and **sounded fine** when listened to directly. This is strong evidence that:
+
+```text
+Q8 GGUF files                    good
+Q8 quantization                  viable on Ampere
+qwentts HTTP/WAV framing         good
+Ryan voice                       good
+RTX 3090 CUDA execution path     good
+GTX 1080 Ti qwentts CUDA path    suspect
+```
+
+The same artifacts producing good audio on Ampere and garbage on Pascal is much
+stronger evidence than merely comparing quantized versus full precision on one
+machine.
+
+#### Separate operational failure: GPU-memory contention
+
+One qwentts process abort on `Ooo` occurred while another Ollama workload was
+also occupying GPU 1. The failure occurred after generation with a GGML backend
+allocation assertion:
+
+```text
+GGML_ASSERT(... ggml_backend_buffer_get_alloc_size ... <= ... buffer_size) failed
+...
+Aborted (core dumped)
+```
+
+After taking the conflicting Ollama workload off GPU 1, a five-run Android
+server preflight through the qwentts MP3 gateway passed 5/5. Treat this as a
+separate residency/VRAM-headroom issue. It explains that crash, but it does not
+explain the consistently garbled raw WAVs on an otherwise free 1080 Ti.
+
+The qwentts gateway now retries transient synthesis failures and waits for the
+engine to become healthy after a container restart before spending the next
+retry. That recovery behavior is useful operationally, but it cannot correct
+numerically wrong audio returned successfully by the engine.
+
+#### Current diagnosis and pending Pascal controls
+
+The current best diagnosis is a **qwentts.cpp / GGML CUDA correctness problem on
+Pascal**, not an Android, MP3, LAN, model-download, voice, or generic Qwen issue.
+Upstream's CUDA-12 image explicitly claims Pascal `sm_61` support, so if the
+remaining controls fail this is a legitimate upstream correctness bug rather
+than simply unsupported hardware.
+
+Before filing that conclusion, run these remaining controls:
+
+1. Compare the exact Docker image ID / repo digest on `Ooo` and `toothbrush`.
+   The `:cuda12` tag is mutable; different image builds would invalidate the
+   otherwise-clean cross-machine comparison.
+2. Run the 1080 Ti with the exact known-good 3090 runtime knobs:
+   `fa=on`, `clamp_fp16=off`.
+3. Run a standalone qwentts CUDA-12 container on the 1080 Ti with
+   `GGML_CUDA_DISABLE_GRAPHS=1`, bypassing local-ai lifecycle code and disabling
+   ggml CUDA graph capture/replay.
+4. If needed, run the qwentts `:cpu` image on `Ooo` with the same GGUFs. Good
+   CPU output plus bad CUDA output on the same host would isolate the failure to
+   the CUDA backend even more directly.
+
+If the image digest matches and the no-CUDA-graphs test is still bad, preserve
+all logs and a representative bad WAV for an upstream qwentts.cpp report.
+
+### Revised deployment status after human quality validation
+
+The current operational choices are now:
+
+| Host/runtime | Speed | Human quality | Status |
+| --- | --- | --- | --- |
+| RTX 3090 + qwentts.cpp Q8 | much faster than real time | good | viable |
+| GTX 1080 Ti + qwentts.cpp Q8 | much faster than real time | garbage | **not viable** |
+| GTX 1080 Ti + qwentts.cpp F32 | not yet the performance target | garbage | **not viable** |
+| GTX 1080 Ti + Wavhost/PyTorch FP32 | ~3.28 RTF baseline | good on paragraph-sized text | slow fallback/control |
+
+Do not use the earlier GTX 1080 Ti Q8 throughput numbers as evidence that the
+backend is deployable. They remain useful performance measurements for a broken
+quality path. Any future TTS benchmark intended to support a deployment decision
+must pair mechanical validity with an explicit retained human-listenable sample.
