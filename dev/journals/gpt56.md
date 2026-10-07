@@ -1440,3 +1440,23 @@ No performance numbers are recorded here yet: this overlay creates the
 reproducible experiments. Run `./scripts/run-candidate-matrix.sh 3 1` on `Ooo`
 and the same command with GPU `0` on the 3090 comparison host, then append the
 measured rows after listening review.
+
+
+### 2026-10-07: candidate matrix CUDA architecture proof correction
+
+The first GTX 1080 Ti Chatterbox Nano run exposed a false-negative in the
+candidate benchmark gate.  The runtime successfully loaded Nano on a CC 6.1
+GTX 1080 Ti with PyTorch 2.7.1+cu126 and reported compiled CUDA arches
+`sm_50, sm_60, sm_70, sm_75, sm_80, sm_86, sm_90`, but the harness required an
+exact literal `sm_61` entry.  That is stricter than CUDA's cubin compatibility
+contract: within a compute-capability major, a cubin targeting minor `m` may run
+on a GPU with the same major and minor >= `m`.  Therefore `sm_60` is a valid
+binary target for CC 6.1.
+
+The proof now selects the highest binary-compatible cubin with matching major
+and compiled minor <= device minor, while still failing if no compatible cubin
+exists.  This preserves the purpose of the proof instead of simply disabling it.
+The interrupted Nano run had already established useful pre-benchmark facts:
+model load succeeded, effective dtype was float32, and CUDA allocation was about
+2.1 GiB on the GTX 1080 Ti.  Audio correctness/RTF remained unmeasured because
+the false architecture gate stopped before synthesis.

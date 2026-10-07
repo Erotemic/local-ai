@@ -144,10 +144,31 @@ if not d.get('cuda_available'):
     raise SystemExit('candidate runtime did not expose CUDA')
 if not cap or len(cap) != 2:
     raise SystemExit(f'missing compute capability: {cap!r}')
-wanted=f"sm_{cap[0]}{cap[1]}"
-if wanted not in arches:
-    raise SystemExit(f'PyTorch build does not contain {wanted}; compiled arch list={arches}')
-print(f"CUDA architecture proof: device={d.get('cuda_device_name')} capability={cap} compiled={wanted} dtype={d.get('effective_dtype')}")
+device_major, device_minor = (int(cap[0]), int(cap[1]))
+compatible = []
+for arch in arches:
+    m = re.fullmatch(r"sm_(\d)(\d+)", str(arch))
+    if not m:
+        continue
+    major, minor = int(m.group(1)), int(m.group(2))
+    # NVIDIA guarantees cubin binary compatibility within a compute-capability
+    # major when the running GPU minor is >= the cubin target minor.  For
+    # example, an sm_60 cubin is valid on a compute-capability 6.1 Pascal GPU.
+    if major == device_major and minor <= device_minor:
+        compatible.append((minor, arch))
+if not compatible:
+    wanted=f"sm_{device_major}{device_minor}"
+    raise SystemExit(
+        f'PyTorch build has no binary-compatible cubin for device {wanted}; '
+        f'compiled arch list={arches}'
+    )
+compatible.sort()
+selected = compatible[-1][1]
+print(
+    f"CUDA architecture proof: device={d.get('cuda_device_name')} "
+    f"capability={cap} compatible_cubin={selected} "
+    f"compiled_arches={arches} dtype={d.get('effective_dtype')}"
+)
 PY
 fi
 
