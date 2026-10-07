@@ -50,6 +50,32 @@ and the reasoning that led to each experiment remain in
    HTTP success, low RTF, and mechanical WAV sanity are explicitly insufficient
    evidence after the Pascal clamp failure.
 
+## Candidate matrix: 2026-10-07
+
+All three candidates produced coherent, usable speech on the GTX 1080 Ti. The
+initial listening pass found no large quality gap; IndexTTS 2.5 may be slightly
+better, and a later comparison judged Chatterbox Flash a bit better than Nano.
+These are subjective impressions from a small retained sample set, not formal
+quality scores.
+
+| Runtime / model | GPU | Dtype | Repeat RTF | Approx. throughput | Listening / role |
+| --- | --- | --- | ---: | ---: | --- |
+| Chatterbox Nano | GTX 1080 Ti | FP32 | **0.3483** | **2.87x realtime** | coherent; fastest / lowest-VRAM candidate |
+| Chatterbox Flash | GTX 1080 Ti | FP32 | **0.7342** | **1.36x realtime** | coherent; modest audible preference over Nano |
+| IndexTTS 2.5 | GTX 1080 Ti | FP32 | **1.3166** | **0.76x realtime** | coherent; possibly slightly higher quality, but slower than realtime |
+| Chatterbox Nano | RTX 3090 | FP32 | **0.1420** | **7.04x realtime** | comparison/render tier |
+| Chatterbox Flash | RTX 3090 | BF16 | **0.2692** | **3.71x realtime** | comparison/render tier |
+| IndexTTS 2.5 | RTX 3090 | BF16 | **0.5645** | **1.77x realtime** | comparison/render tier |
+
+The 3090/1080 Ti repeat-RTF ratios are approximately 2.45x (Nano), 2.73x
+(Flash), and 2.33x (IndexTTS). Only Nano is a clean FP32-to-FP32 hardware
+comparison; Flash and IndexTTS also change to BF16 on Ampere.
+
+On the 1080 Ti the runtime endpoint reported active CUDA allocation of about
+1.96 GiB for Nano, 3.27 GiB for Flash, and 6.47 GiB for IndexTTS 2.5. The pasted
+3090 summary did not include memory metadata, so no 3090 VRAM number is recorded
+here.
+
 ## Known non-canonical observation
 
 The CSV preserves one 3090 Wavhost run whose dtype chronology was ambiguous.

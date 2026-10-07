@@ -1399,8 +1399,9 @@ exact CUDA architecture exposed by PyTorch, and emit a mandatory human listening
 checklist. Promotion requires the listening gate to pass on Pascal.
 
 For cross-hardware comparability the candidate images intentionally standardize
-on PyTorch 2.7.1 / CUDA 12.6. This wheel line retains Pascal `sm_61` and Ampere
-`sm_86`. The runtime endpoint reports `torch.cuda.get_arch_list()`, actual
+on PyTorch 2.7.1 / CUDA 12.6. This wheel line provides a binary-compatible
+Pascal cubin (`sm_60` on the tested CC 6.1 card) and native Ampere `sm_86`. The
+runtime endpoint reports `torch.cuda.get_arch_list()`, actual
 compute capability, dtype policy, exact source/model revisions, and CUDA memory
 allocation. The benchmark fails before synthesis if the actual SM is absent
 from the compiled architecture list.
@@ -1460,3 +1461,142 @@ The interrupted Nano run had already established useful pre-benchmark facts:
 model load succeeded, effective dtype was float32, and CUDA allocation was about
 2.1 GiB on the GTX 1080 Ti.  Audio correctness/RTF remained unmeasured because
 the false architecture gate stopped before synthesis.
+
+### 2026-10-07 — Candidate matrix results on GTX 1080 Ti and RTX 3090
+
+The candidate matrix was completed on both target hardware tiers using the
+pinned experiment stack described above. The primary deployment target remains
+`Ooo` / GTX 1080 Ti; the RTX 3090 run on `toothbrush` is a comparison/render
+measurement rather than a requirement for interactive lecture playback.
+
+Common experiment properties:
+
+```text
+PyTorch:       2.7.1+cu126
+CUDA runtime:  12.6
+reference:     retained Ryan WAV
+runs:          3 per backend (1 first + 2 repeat)
+1080 Ti GPU:   physical GPU 1, compute capability 6.1, compatible cubin sm_60
+3090 GPU:      physical GPU 0, compute capability 8.6, native cubin sm_86
+```
+
+The dtype policy was intentionally architecture-sensitive rather than forced to
+one precision everywhere:
+
+```text
+                     GTX 1080 Ti       RTX 3090
+Chatterbox Nano      float32           float32
+Chatterbox Flash     float32           bfloat16
+IndexTTS 2.5         float32           bfloat16
+```
+
+Therefore the Flash and IndexTTS cross-GPU ratios below combine GPU generation
+and dtype policy. Nano is the cleaner FP32-to-FP32 hardware comparison.
+
+#### GTX 1080 Ti results
+
+All three candidates loaded and synthesized successfully on Pascal. Mechanical
+WAV checks passed, and direct listening found all three outputs coherent and
+usable. The listener could not identify a large quality gap in this initial
+lecture-like prompt. IndexTTS 2.5 may have sounded slightly better, but the
+preference was weak/hard to distinguish.
+
+| Backend | Startup evidence | First RTF | Repeat RTFs | Repeat mean RTF | Throughput | Audio duration | Runtime CUDA allocation |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Chatterbox Nano | 46.556 s cold-load evidence | 0.3799 | 0.3490, 0.3475 | **0.3483** | **2.87x realtime** | 18.880 s | 2,104,182,272 B (~1.96 GiB) |
+| Chatterbox Flash | 58.458 s | 0.7383 | 0.7345, 0.7339 | **0.7342** | **1.36x realtime** | 31.840 s | 3,510,799,360 B (~3.27 GiB) |
+| IndexTTS 2.5 | 104.091 s | 1.6387 | 1.3271, 1.3061 | **1.3166** | **0.76x realtime** | 16.893 s | 6,952,131,584 B (~6.47 GiB) |
+
+Nano's post-hotfix matrix rerun printed `startup_seconds=0.750` because its
+container was already running from the interrupted architecture-proof attempt.
+That is a warm restart and must not be compared with the cold Flash/Index
+startup measurements. The earlier interrupted Nano run measured 46.556 s from
+container start to readiness and is the appropriate cold-load evidence.
+
+Retained Pascal artifacts:
+
+```text
+/data/services/local-ai/tts/tts/benchmarks/20261007T193206Z-chatterbox-nano-chatterbox-nano-ryan
+/data/services/local-ai/tts/tts/benchmarks/20261007T193336Z-chatterbox-flash-chatterbox-flash-ryan
+/data/services/local-ai/tts/tts/benchmarks/20261007T193642Z-indextts25-indextts-2.5-ryan
+```
+
+#### RTX 3090 results
+
+The same pinned matrix was run on physical GPU 0 of `toothbrush`.
+
+| Backend | Startup | First RTF | Repeat RTFs | Repeat mean RTF | Throughput | Audio duration |
+| --- | ---: | ---: | --- | ---: | ---: | ---: |
+| Chatterbox Nano | 21.696 s | 0.1525 | 0.1455, 0.1385 | **0.1420** | **7.04x realtime** | 18.880 s |
+| Chatterbox Flash | 24.641 s | 0.2851 | 0.2694, 0.2690 | **0.2692** | **3.71x realtime** | 16.640 s |
+| IndexTTS 2.5 | 39.748 s | 0.7120 | 0.5589, 0.5700 | **0.5645** | **1.77x realtime** | 18.611 s |
+
+Retained Ampere artifacts:
+
+```text
+/data/local-ai/services/tts/benchmarks/20261007T205337Z-chatterbox-nano-chatterbox-nano-ryan
+/data/local-ai/services/tts/benchmarks/20261007T205421Z-chatterbox-flash-chatterbox-flash-ryan
+/data/local-ai/services/tts/benchmarks/20261007T205526Z-indextts25-indextts-2.5-ryan
+```
+
+The pasted 3090 summary did not include the `/v1/runtime` memory fields, so do
+not invent or back-fill 3090 VRAM usage from model size. The full retained log
+can supply those later if needed.
+
+#### Cross-GPU normalized comparison
+
+Using only the two repeat RTF measurements on each GPU:
+
+| Backend | 1080 Ti repeat RTF | 3090 repeat RTF | 3090 RTF improvement |
+| --- | ---: | ---: | ---: |
+| Chatterbox Nano | 0.3483 | 0.1420 | **2.45x lower RTF** |
+| Chatterbox Flash | 0.7342 | 0.2692 | **2.73x lower RTF** |
+| IndexTTS 2.5 | 1.3166 | 0.5645 | **2.33x lower RTF** |
+
+Do not interpret the Flash/Index ratios as pure hardware acceleration because
+those candidates also switch FP32 -> BF16 on Ampere. Nano remains FP32 on both
+machines and is therefore the most direct hardware-only comparison of the
+three.
+
+Generated duration also changed materially for the stochastic candidates. Nano
+produced exactly 18.880 s on both machines, but Flash produced 31.840 s on the
+1080 Ti and 16.640 s on the 3090, while IndexTTS produced 16.893 s and 18.611 s
+respectively. This is why RTF, not wall time alone, remains the primary
+throughput metric. It is also evidence that a single sample should not be used
+to make fine-grained prosody/quality claims.
+
+#### Deployment interpretation and listening result
+
+The important Pascal result is that **all three new candidates are genuinely
+usable**, not merely executable. This is a substantial contrast with the earlier
+qwentts clamp-on failure mode, where mechanically valid and fast WAVs were
+corrupted.
+
+For the on-demand lecture role:
+
+- **Chatterbox Nano** is the clear efficiency leader on the GTX 1080 Ti: ~0.348
+  steady-state RTF (~2.87x realtime) and ~1.96 GiB active CUDA allocation.
+- **Chatterbox Flash** remains comfortably faster than realtime at ~0.734 RTF
+  and, after listening across the candidate outputs, was judged **a bit better
+  than Nano**. This gives Flash a meaningful quality/latency tradeoff rather
+  than making it redundant with Nano.
+- **IndexTTS 2.5** was coherent and may be slightly higher quality, but the
+  initial preference was weak. In the conservative Pascal baseline it is slower
+  than realtime (~1.317 repeat RTF), so it is less attractive for interactive
+  chunk generation unless optimization or prefetching closes that gap.
+
+The current practical ranking is therefore not a single scalar winner:
+
+```text
+minimum latency / VRAM:     Chatterbox Nano
+better audible quality:     Chatterbox Flash (modest preference over Nano)
+possible quality ceiling:   IndexTTS 2.5, but not clearly enough better yet to
+                            justify its Pascal latency in this simple test
+```
+
+Before making a permanent backend choice, run a harder lecture-oriented listen
+set (long paragraphs, technical acronyms, math, numbers, punctuation, names,
+and 60-90 s expected speech). The current evidence is already sufficient to
+keep Nano and Flash as serious Pascal deployment options; future work should
+focus on quality discrimination and long-form stability rather than basic GPU
+compatibility.
