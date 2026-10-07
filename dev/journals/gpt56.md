@@ -1385,3 +1385,58 @@ quality and preference should be judged separately with retained listen-gate
 samples. From a throughput and compatibility perspective, however, the 1.7B
 Q8 model is viable enough that model choice can be based primarily on audible
 quality rather than GTX 1080 Ti performance constraints.
+
+### 2026-10-07 — Candidate TTS matrix for Pascal-first deployment
+
+The next candidate serving pass adds IndexTTS 2.5, Chatterbox Flash, and
+Chatterbox Nano. The primary success criterion is still the GTX 1080 Ti lecture
+server; RTX 3090 runs are comparison/render measurements.
+
+A key lesson from the qwentts clamp incident is now encoded in the harness:
+HTTP 200 + low RTF + structurally valid WAV is not enough. Candidate benchmarks
+retain every sample, run mechanical duration/RMS/finite-value checks, record the
+exact CUDA architecture exposed by PyTorch, and emit a mandatory human listening
+checklist. Promotion requires the listening gate to pass on Pascal.
+
+For cross-hardware comparability the candidate images intentionally standardize
+on PyTorch 2.7.1 / CUDA 12.6. This wheel line retains Pascal `sm_61` and Ampere
+`sm_86`. The runtime endpoint reports `torch.cuda.get_arch_list()`, actual
+compute capability, dtype policy, exact source/model revisions, and CUDA memory
+allocation. The benchmark fails before synthesis if the actual SM is absent
+from the compiled architecture list.
+
+Pinned experiments:
+
+```text
+IndexTTS 2.5 source:
+  6e353fe2611afb6a7e3f13a7a6be3d4e27142119
+IndexTTS 2.5 model:
+  c39ce5ba981572cb187443877ff559dfb246ce63
+IndexTTS auxiliary checkpoints:
+  facebook/w2v-bert-2.0                 da985ba0987f70aaeb84a80f2851cfac8c697a7b
+  amphion/MaskGCT                       265c6cef07625665d0c28d2faafb1415562379dc
+  funasr/campplus                        e4b6ede7ce16997aff4ae69fbca1f0175e2afede
+  nvidia/bigvgan_v2_22khz_80band_256x  633ff708ed5b74903e86ff1298cf4a98e921c513
+
+Chatterbox source (Nano):
+  5de7a54aa4e5e2baadb0182dde554908b48b85c2
+Chatterbox Nano model:
+  71ccd1d0081b430592cea481f4307e764e07bc64
+
+Chatterbox Flash source:
+  74e05baa8ce574bf2cc571702391a21f1b0d48c5
+Chatterbox Flash model:
+  4385507288b8197e6dab8b4e6b1603328d549d9d
+Perth source:
+  ce86c49d029f42272c1902eccb675556b9ed2330
+```
+
+Baseline policy is correctness-first: IndexTTS disables optional fused/custom
+acceleration and uses FP32 on Pascal / BF16 on Ampere; Flash uses the portable
+Torch attention engine with CUDA graphs off. Optimization is a follow-up only
+after retained audio passes on both GPUs.
+
+No performance numbers are recorded here yet: this overlay creates the
+reproducible experiments. Run `./scripts/run-candidate-matrix.sh 3 1` on `Ooo`
+and the same command with GPU `0` on the 3090 comparison host, then append the
+measured rows after listening review.

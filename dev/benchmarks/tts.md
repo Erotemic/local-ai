@@ -29,27 +29,26 @@ and the reasoning that led to each experiment remain in
 | Wavhost / PyTorch Qwen3-TTS 0.6B | GTX 1080 Ti | FP32, manual attention | 3.284 | 0.30x real time | canonical Pascal full-precision baseline |
 | qwentts.cpp / GGML Q8_0 | RTX 3090 | clamp=1, FA on | 0.1655 | 6.04x real time | cross-GPU comparable Q8 baseline |
 | qwentts.cpp / GGML Q8_0 | RTX 3090 | clamp=0, FA on | 0.1480 | 6.76x real time | preferred Ampere configuration so far |
-| qwentts.cpp / GGML Q8_0 | GTX 1080 Ti | clamp=1, FA on | 0.2440 | 4.10x real time | preferred Pascal configuration so far |
+| qwentts.cpp / GGML Q8_0 | GTX 1080 Ti | clamp=0, FA on | ~0.238 | ~4.20x real time | later correctness-validated Pascal configuration; standalone retained sample |
 
 ## Current conclusions
 
 1. The qwentts.cpp/GGML Q8_0 serving path is comfortably faster than real time
-   on both tested GPUs. On the GTX 1080 Ti the repeat mean is 0.244 RTF; on the
-   RTX 3090 it is 0.148 RTF with the Ampere clamp disabled.
-2. Disabling `CLAMP_FP16` on the RTX 3090 reduced the observed repeat mean RTF
-   from 0.1655 to 0.1480 (about 10.6% lower RTF). Treat that as a tentative
-   runtime-knob result rather than a precision microbenchmark: the generated
-   utterance lengths differed substantially and sampling was stochastic.
-3. Keep `CLAMP_FP16=1` on Pascal unless a dedicated 1080 Ti experiment shows it
-   is unnecessary. Its purpose is hardware robustness, and the current 0.244
-   RTF already exceeds the real-time requirement by a wide margin.
-4. The end-to-end qwentts/Q8 improvement over the Wavhost/PyTorch FP32 baseline
-   is very large (~10.5x lower repeat RTF on the 3090 with clamp off; ~13.5x on
-   the 1080 Ti with clamp on), but those numbers combine runtime, kernels, and
-   quantization and must not be described as quantization-only speedups.
-5. Lower-bit Q4 experiments are no longer required to meet the original
-   real-time serving goal. Run them only for a separate throughput/VRAM goal and
-   compare retained audio quality.
+   on both tested GPUs. The later Pascal correctness matrix established that
+   `CLAMP_FP16=0` is required on the tested GTX 1080 Ti; `CLAMP_FP16=1` can
+   produce garbling or premature EOS even though the returned WAV is structurally
+   valid.
+2. The older 1080 Ti clamp-enabled rows remain in the CSV as historical timing
+   observations, but they must not be used as a deployment-quality baseline.
+   The journal records a later correct-audio clamp-off sample at about 0.238 RTF.
+3. On the RTX 3090, disabling the clamp reduced the observed repeat mean RTF
+   from 0.1655 to 0.1480. Treat this as a runtime-knob observation rather than a
+   precision-only benchmark because generated durations differed.
+4. The end-to-end qwentts/Q8 improvement over the old Wavhost/PyTorch path is
+   large, but runtime, kernels, quantization and serving architecture all changed.
+5. New candidate experiments must retain audio and pass a human listening gate.
+   HTTP success, low RTF, and mechanical WAV sanity are explicitly insufficient
+   evidence after the Pascal clamp failure.
 
 ## Known non-canonical observation
 

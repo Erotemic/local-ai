@@ -1,7 +1,7 @@
 [service]
 name = "tts"
 display_name = "Local TTS"
-description = "Local OpenAI-compatible TTS with quantized qwentts.cpp plus GPU and CPU Kokoro-FastAPI backends."
+description = "Local OpenAI-compatible TTS with production backends plus reproducible candidate experiments."
 compose_service = "qwentts-gateway"
 compose_build_target = "qwentts-gateway"
 bind_var = "TTS_BIND_ADDRESS"
@@ -14,7 +14,7 @@ required = [
   "TTS_DATA_ROOT",
   "TTS_BIND_ADDRESS",
   "TTS_ACTIVE_BACKEND",
-  "TTS_QWENTTS_MODELS",
+  "TTS_MODEL_BUNDLES",
   "TTS_QWENTTS_PORT",
   "TTS_QWENTTS_GPU",
   "TTS_QWENTTS_IMAGE",
@@ -34,6 +34,39 @@ required = [
   "TTS_KOKORO_GPU_IMAGE",
   "TTS_KOKORO_CPU_PORT",
   "TTS_KOKORO_CPU_IMAGE",
+  "TTS_EXPERIMENT_TORCH_VERSION",
+  "TTS_EXPERIMENT_TORCHAUDIO_VERSION",
+  "TTS_EXPERIMENT_TORCHVISION_VERSION",
+  "TTS_EXPERIMENT_TORCH_CUDA_TAG",
+  "TTS_INDEXTTS25_PORT",
+  "TTS_INDEXTTS25_GPU",
+  "TTS_INDEXTTS25_IMAGE",
+  "TTS_INDEXTTS25_MODEL_ALIAS",
+  "TTS_INDEXTTS25_SOURCE_REVISION",
+  "TTS_INDEXTTS25_MODEL_REVISION",
+  "TTS_INDEXTTS25_W2VBERT_REVISION",
+  "TTS_INDEXTTS25_MASKGCT_REVISION",
+  "TTS_INDEXTTS25_CAMPPLUS_REVISION",
+  "TTS_INDEXTTS25_BIGVGAN_REVISION",
+  "TTS_INDEXTTS25_DTYPE",
+  "TTS_INDEXTTS25_START_TIMEOUT",
+  "TTS_CHATTERBOX_FLASH_PORT",
+  "TTS_CHATTERBOX_FLASH_GPU",
+  "TTS_CHATTERBOX_IMAGE",
+  "TTS_CHATTERBOX_FLASH_MODEL_ALIAS",
+  "TTS_CHATTERBOX_FLASH_SOURCE_REVISION",
+  "TTS_CHATTERBOX_FLASH_MODEL_REVISION",
+  "TTS_CHATTERBOX_FLASH_DTYPE",
+  "TTS_CHATTERBOX_FLASH_ENGINE",
+  "TTS_CHATTERBOX_FLASH_CUDA_GRAPH",
+  "TTS_CHATTERBOX_FLASH_STEPS",
+  "TTS_CHATTERBOX_FLASH_START_TIMEOUT",
+  "TTS_CHATTERBOX_NANO_PORT",
+  "TTS_CHATTERBOX_NANO_GPU",
+  "TTS_CHATTERBOX_NANO_MODEL_ALIAS",
+  "TTS_CHATTERBOX_NANO_SOURCE_REVISION",
+  "TTS_CHATTERBOX_NANO_MODEL_REVISION",
+  "TTS_CHATTERBOX_NANO_START_TIMEOUT",
   "TTS_BENCH_QWENTTS_MODEL",
   "TTS_BENCH_QWENTTS_VOICE",
   "TTS_BENCH_KOKORO_MODEL",
@@ -44,7 +77,7 @@ required = [
 TTS_DATA_ROOT = "{LOCAL_AI_SERVICE_ROOT}/tts"
 
 [model_selection]
-env = "TTS_QWENTTS_MODELS"
+env = "TTS_MODEL_BUNDLES"
 
 [[directories]]
 label = "TTS service state"
@@ -92,4 +125,70 @@ include = [
 check_files = [
   "qwen-talker-1.7b-customvoice-Q8_0.gguf",
   "qwen-tokenizer-12hz-Q8_0.gguf",
+]
+
+[[models]]
+name = "indextts-2.5"
+label = "IndexTTS 2.5 + required auxiliary models"
+required = false
+source = "compose-command"
+source_label = "hf://IndexTeam/IndexTTS-2.5 + upstream auxiliary checkpoints"
+revision = "main={TTS_INDEXTTS25_MODEL_REVISION};w2vbert={TTS_INDEXTTS25_W2VBERT_REVISION};maskgct={TTS_INDEXTTS25_MASKGCT_REVISION};campplus={TTS_INDEXTTS25_CAMPPLUS_REVISION};bigvgan={TTS_INDEXTTS25_BIGVGAN_REVISION}"
+destination = "{HF_REPOS_ROOT}/IndexTeam/IndexTTS-2.5"
+container_path = "/models"
+compose_service = "indextts25"
+compose_build_target = "indextts25"
+command = ["--provision-only"]
+check_files = [
+  "config.yaml",
+  "gpt.pth",
+  "codec.pth",
+  "s2mel.pth",
+  "wav2vec2bert_stats.pt",
+  "hf_cache/campplus_cn_common.bin",
+  "hf_cache/semantic_codec_model.safetensors",
+  "hf_cache/bigvgan/config.json",
+  "hf_cache/bigvgan/bigvgan_generator.pt",
+  ".local-ai-aux-revisions.json",
+]
+check_dirs = ["hf_cache/w2v-bert-2.0"]
+
+[[models]]
+name = "chatterbox-flash"
+label = "Chatterbox Flash"
+required = false
+source = "huggingface"
+source_label = "hf://ResembleAI/chatterbox-flash@{TTS_CHATTERBOX_FLASH_MODEL_REVISION}"
+repository = "ResembleAI/chatterbox-flash"
+revision = "{TTS_CHATTERBOX_FLASH_MODEL_REVISION}"
+destination = "{HF_REPOS_ROOT}/ResembleAI/chatterbox-flash"
+container_path = "/models"
+compose_build_target = "chatterbox-flash"
+check_files = [
+  "t3_flash.safetensors",
+  "s3gen.safetensors",
+  "ve.safetensors",
+  "tokenizer.json",
+]
+
+[[models]]
+name = "chatterbox-nano"
+label = "Chatterbox Nano"
+required = false
+source = "huggingface"
+source_label = "hf://ResembleAI/chatterbox-nano@{TTS_CHATTERBOX_NANO_MODEL_REVISION}"
+repository = "ResembleAI/chatterbox-nano"
+revision = "{TTS_CHATTERBOX_NANO_MODEL_REVISION}"
+destination = "{HF_REPOS_ROOT}/ResembleAI/chatterbox-nano"
+container_path = "/models"
+compose_build_target = "chatterbox-flash"
+check_files = [
+  "t3_nano_v1.safetensors",
+  "s3gen_meanflow.safetensors",
+  "ve.safetensors",
+  "tokenizer_config.json",
+  "vocab.json",
+  "merges.txt",
+  "special_tokens_map.json",
+  "conds.pt",
 ]

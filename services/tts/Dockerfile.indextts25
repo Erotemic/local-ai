@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim-bookworm
+
+ARG INDEXTTS_REVISION=6e353fe2611afb6a7e3f13a7a6be3d4e27142119
+ARG TORCH_VERSION=2.7.1
+ARG TORCHAUDIO_VERSION=2.7.1
+ARG TORCHVISION_VERSION=0.22.1
+ARG TORCH_CUDA_TAG=cu126
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake ffmpeg git libgl1 libglib2.0-0 libsndfile1 ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install \
+      "torch==${TORCH_VERSION}" \
+      "torchaudio==${TORCHAUDIO_VERSION}" \
+      "torchvision==${TORCHVISION_VERSION}" \
+      --index-url "https://download.pytorch.org/whl/${TORCH_CUDA_TAG}"
+
+RUN git clone https://github.com/index-tts/index-tts.git /opt/index-tts \
+    && git -C /opt/index-tts checkout "${INDEXTTS_REVISION}"
+
+# IndexTTS upstream pins torch 2.8/cu128. For the cross-hardware experiment we
+# intentionally keep the same 2.7.1/cu126 environment on Pascal and Ampere.
+# Install every other declared runtime dependency from the pinned source tree.
+RUN python - <<'PY'
+import tomllib
+from pathlib import Path
+src = Path('/opt/index-tts/pyproject.toml')
+deps = tomllib.loads(src.read_text())['project']['dependencies']
+kept = []
+for dep in deps:
+    name = dep.split(';', 1)[0].strip().split('@', 1)[0].strip()
+    for sep in '<>=!~[ ':
+        name = name.split(sep, 1)[0]
+    if name.lower() in {'torch', 'torchaudio', 'torchvision'}:
+        continue
+    kept.append(dep)
+Path('/tmp/indextts-requirements.txt').write_text('\n'.join(kept) + '\n')
+PY
+RUN python -m pip install -r /tmp/indextts-requirements.txt \
+    && python -m pip install --no-deps /opt/index-tts
+
+COPY services/tts/scripts/candidate_server.py /opt/local-ai/candidate_server.py
+WORKDIR /opt/local-ai
+ENTRYPOINT ["python", "/opt/local-ai/candidate_server.py"]

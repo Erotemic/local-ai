@@ -1,11 +1,16 @@
 # Local TTS service
 
-This service provides three explicitly separate local TTS runtimes behind
-OpenAI-compatible HTTP APIs:
+This service provides stable qwentts/Kokoro deployments plus opt-in candidate
+experiments behind OpenAI-compatible HTTP APIs. The primary deployment target
+is the GTX 1080 Ti; RTX 3090 runs are a comparison/render tier.
+
+Operational baselines:
 
 - **qwentts.cpp** for fast quantized Qwen3-TTS on NVIDIA GPUs;
 - **Kokoro-FastAPI GPU** using the known-good Pascal-compatible image;
 - **Kokoro-FastAPI CPU** for machines where no NVIDIA runtime should be needed.
+
+Opt-in candidates: **IndexTTS 2.5**, **Chatterbox Flash**, and **Chatterbox Nano**.
 
 There is intentionally no Wavhost layer. `local-ai` owns deployment and backend
 selection directly.
@@ -19,6 +24,9 @@ qwentts.cpp raw engine      11436
 qwentts client gateway      11437
 Kokoro-FastAPI GPU           8880
 Kokoro-FastAPI CPU           8881
+IndexTTS 2.5                 11438
+Chatterbox Flash             11439
+Chatterbox Nano              11440
 ```
 
 The qwentts gateway is the normal client endpoint. It proxies discovery,
@@ -56,7 +64,7 @@ Provision the 1.7B CustomVoice Q8 model as well with:
 or keep both selected in `.env`:
 
 ```dotenv
-TTS_QWENTTS_MODELS=qwen-0.6-customvoice-q8-gguf,qwen-1.7-customvoice-q8-gguf
+TTS_MODEL_BUNDLES=qwen-0.6-customvoice-q8-gguf,qwen-1.7-customvoice-q8-gguf
 ```
 
 ## qwentts on GTX 1080 Ti
@@ -165,6 +173,9 @@ Normal `./start.sh` operation is exclusive and accepts:
 qwentts
 kokoro-gpu
 kokoro-cpu
+indextts25
+chatterbox-flash
+chatterbox-nano
 ```
 
 Direct experiment starts are also available:
@@ -173,6 +184,9 @@ Direct experiment starts are also available:
 ./start-qwentts.sh
 ./start-kokoro-gpu.sh
 ./start-kokoro-cpu.sh
+./start-indextts25.sh
+./start-chatterbox-flash.sh
+./start-chatterbox-nano.sh
 ```
 
 ## LAN use
@@ -194,6 +208,9 @@ The common benchmark supports all active runtimes:
 ./scripts/benchmark.sh qwentts 5
 ./scripts/benchmark.sh kokoro-gpu 5
 ./scripts/benchmark.sh kokoro-cpu 5
+./scripts/benchmark.sh indextts25 5
+./scripts/benchmark.sh chatterbox-flash 5
+./scripts/benchmark.sh chatterbox-nano 5
 ```
 
 Artifacts are retained under `{TTS_DATA_ROOT}/benchmarks` by default and include
@@ -217,3 +234,38 @@ qwentts GGUF files use the shared canonical model repository:
 The Kokoro images contain/manage their own runtime assets and need no service
 state volume for ordinary synthesis. TTS-private state is therefore limited to
 retained benchmark artifacts.
+
+## Experimental candidates: IndexTTS 2.5, Chatterbox Flash, Chatterbox Nano
+
+Three newer runtimes are available as opt-in experiments without replacing the
+known qwentts/Kokoro paths:
+
+```text
+indextts25         http://127.0.0.1:11438
+chatterbox-flash   http://127.0.0.1:11439
+chatterbox-nano    http://127.0.0.1:11440
+```
+
+Provision them explicitly:
+
+```bash
+./setup.sh --accept-defaults \
+    --with-model indextts-2.5 \
+    --with-model chatterbox-flash \
+    --with-model chatterbox-nano
+```
+
+Then run the reproducible hardware matrix described in
+[`EXPERIMENTS.md`](EXPERIMENTS.md). Every candidate exposes `/health`,
+`/v1/models`, `/v1/runtime`, and `/v1/audio/speech`. WAV and MP3 responses are
+supported; benchmarks deliberately request WAV so transport transcoding does not
+contaminate model RTF.
+
+The default model selection key is now generic:
+
+```dotenv
+TTS_MODEL_BUNDLES=qwen-0.6-customvoice-q8-gguf
+```
+
+Existing `TTS_QWENTTS_MODELS` configuration is migrated automatically by
+`setup.sh`.

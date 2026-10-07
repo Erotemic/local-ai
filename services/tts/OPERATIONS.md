@@ -111,3 +111,21 @@ side-by-side. qwentts raw benchmarking uses port 11436.
 All three servers are unauthenticated HTTP services. `127.0.0.1` is the safe
 default. Bind to `0.0.0.0` only on a trusted LAN/VPN and restrict the exposed
 ports with the host firewall when other interfaces are untrusted.
+
+## Candidate experiment backends
+
+Candidate experiments are intentionally not started or provisioned by default.
+See `EXPERIMENTS.md` for the full proof protocol.
+
+The additional `TTS_ACTIVE_BACKEND` values are:
+
+```text
+indextts25
+chatterbox-flash
+chatterbox-nano
+```
+
+`./start.sh` still enforces exclusive normal operation, so selecting one of
+these stops qwentts, both Kokoro variants, and the other candidates first.
+Direct `start-*.sh` scripts do not stop unrelated services and are reserved for
+controlled multi-GPU experiments.

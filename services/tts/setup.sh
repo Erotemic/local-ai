@@ -4,9 +4,14 @@ SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SERVICE_DIR/../.." && pwd)"
 SERVICE_ENV="$SERVICE_DIR/.env"
 
-# Schema v6 removes the retired Wavhost deployment. Clean those keys before the
-# generic config refresher runs so they are not carried forward as local extras.
+# Schema v7 adds generic model bundles and candidate TTS experiments. Migrate
+# the old qwentts-only bundle key before the generic config refresher runs.
 if [[ -f "$SERVICE_ENV" ]]; then
+  old_bundles="$(sed -n 's/^TTS_QWENTTS_MODELS=//p' "$SERVICE_ENV" | tail -n 1)"
+  if [[ -n "$old_bundles" ]] && ! grep -q '^TTS_MODEL_BUNDLES=' "$SERVICE_ENV"; then
+    printf '\nTTS_MODEL_BUNDLES=%s\n' "$old_bundles" >> "$SERVICE_ENV"
+  fi
+
   current_backend="$(sed -n 's/^TTS_ACTIVE_BACKEND=//p' "$SERVICE_ENV" | tail -n 1)"
   case "$current_backend" in
     kokoro)
@@ -20,6 +25,7 @@ if [[ -f "$SERVICE_ENV" ]]; then
 
   tmp="$(mktemp "$SERVICE_DIR/.env.migrate.XXXXXX")"
   awk '
+    /^TTS_QWENTTS_MODELS=/ {next}
     /^TTS_WAVHOST_/ {next}
     /^WAVHOST_/ {next}
     /^TTS_TORCH_VERSION=/ {next}
@@ -63,8 +69,12 @@ case "${TTS_ACTIVE_BACKEND:-qwentts}" in
   kokoro-cpu)
     "$SERVICE_DIR/compose.sh" pull kokoro-cpu
     ;;
+  indextts25|chatterbox-flash|chatterbox-nano)
+    # Candidate images are local builds selected by their model bundle. Their
+    # weights were provisioned above; no registry pull is needed here.
+    ;;
   *)
-    echo "ERROR: TTS_ACTIVE_BACKEND must be qwentts, kokoro-gpu, or kokoro-cpu." >&2
+    echo "ERROR: unsupported TTS_ACTIVE_BACKEND=${TTS_ACTIVE_BACKEND:-}." >&2
     exit 2
     ;;
 esac

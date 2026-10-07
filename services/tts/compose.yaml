@@ -111,3 +111,144 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  # IndexTTS 2.5 experiment. The image deliberately overrides upstream's newer
+  # torch/cu128 default with the Pascal-capable cu126 comparison stack.
+  indextts25:
+    build:
+      context: ../..
+      dockerfile: services/tts/Dockerfile.indextts25
+      args:
+        INDEXTTS_REVISION: ${TTS_INDEXTTS25_SOURCE_REVISION}
+        TORCH_VERSION: ${TTS_EXPERIMENT_TORCH_VERSION}
+        TORCHAUDIO_VERSION: ${TTS_EXPERIMENT_TORCHAUDIO_VERSION}
+        TORCHVISION_VERSION: ${TTS_EXPERIMENT_TORCHVISION_VERSION}
+        TORCH_CUDA_TAG: ${TTS_EXPERIMENT_TORCH_CUDA_TAG}
+    image: ${TTS_INDEXTTS25_IMAGE}
+    container_name: ai-voice-indextts25
+    restart: unless-stopped
+    ports:
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_INDEXTTS25_PORT:-11438}:8080"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      HF_HOME: /cache/huggingface
+      TTS_CANDIDATE_BACKEND: indextts25
+      TTS_MODEL_ALIAS: ${TTS_INDEXTTS25_MODEL_ALIAS:-indextts-2.5}
+      TTS_MODEL_DIR: /models
+      TTS_REFERENCE_WAV: /voices/ryan.wav
+      TTS_LANGUAGE: EN
+      TTS_DTYPE: ${TTS_INDEXTTS25_DTYPE:-auto}
+      TTS_SOURCE_REVISION: ${TTS_INDEXTTS25_SOURCE_REVISION}
+      TTS_MODEL_REVISION: ${TTS_INDEXTTS25_MODEL_REVISION}
+      TTS_INDEXTTS25_W2VBERT_REVISION: ${TTS_INDEXTTS25_W2VBERT_REVISION}
+      TTS_INDEXTTS25_MASKGCT_REVISION: ${TTS_INDEXTTS25_MASKGCT_REVISION}
+      TTS_INDEXTTS25_CAMPPLUS_REVISION: ${TTS_INDEXTTS25_CAMPPLUS_REVISION}
+      TTS_INDEXTTS25_BIGVGAN_REVISION: ${TTS_INDEXTTS25_BIGVGAN_REVISION}
+      TTS_HOST: 0.0.0.0
+      TTS_PORT: "8080"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # rw is required by the explicit --provision-only setup command; normal
+      # serving does not intentionally modify the checkpoint tree.
+      - ${HF_REPOS_ROOT:?run ./setup.sh and use ./compose.sh}/IndexTeam/IndexTTS-2.5:/models:rw
+      - ${TTS_DATA_ROOT:?run ./setup.sh and use ./compose.sh}/cache/indextts25:/cache:rw
+      - ./qwen-0.6-ryan-sample.wav:/voices/ryan.wav:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_INDEXTTS25_GPU:-1}"]
+              capabilities: ["gpu"]
+
+  # Chatterbox Flash uses a pinned source tree and, initially, its portable
+  # torch attention backend rather than FlashInfer so Pascal is a first-class
+  # correctness target instead of an accidental fallback.
+  chatterbox-flash:
+    build:
+      context: ../..
+      dockerfile: services/tts/Dockerfile.chatterbox
+      args:
+        CHATTERBOX_REVISION: ${TTS_CHATTERBOX_SOURCE_REVISION}
+        CHATTERBOX_FLASH_REVISION: ${TTS_CHATTERBOX_FLASH_SOURCE_REVISION}
+        PERTH_REVISION: ${TTS_CHATTERBOX_PERTH_REVISION}
+        TORCH_VERSION: ${TTS_EXPERIMENT_TORCH_VERSION}
+        TORCHAUDIO_VERSION: ${TTS_EXPERIMENT_TORCHAUDIO_VERSION}
+        TORCHVISION_VERSION: ${TTS_EXPERIMENT_TORCHVISION_VERSION}
+        TORCH_CUDA_TAG: ${TTS_EXPERIMENT_TORCH_CUDA_TAG}
+    image: ${TTS_CHATTERBOX_IMAGE}
+    container_name: ai-voice-chatterbox-flash
+    restart: unless-stopped
+    ports:
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_CHATTERBOX_FLASH_PORT:-11439}:8080"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      TTS_CANDIDATE_BACKEND: chatterbox-flash
+      TTS_MODEL_ALIAS: ${TTS_CHATTERBOX_FLASH_MODEL_ALIAS:-chatterbox-flash}
+      TTS_MODEL_DIR: /models
+      TTS_REFERENCE_WAV: /voices/ryan.wav
+      TTS_DTYPE: ${TTS_CHATTERBOX_FLASH_DTYPE:-auto}
+      TTS_SOURCE_REVISION: ${TTS_CHATTERBOX_FLASH_SOURCE_REVISION}
+      TTS_MODEL_REVISION: ${TTS_CHATTERBOX_FLASH_MODEL_REVISION}
+      TTS_FLASH_ENGINE: ${TTS_CHATTERBOX_FLASH_ENGINE:-torch}
+      TTS_FLASH_CUDA_GRAPH: ${TTS_CHATTERBOX_FLASH_CUDA_GRAPH:-0}
+      TTS_FLASH_STEPS: ${TTS_CHATTERBOX_FLASH_STEPS:-10}
+      TTS_HOST: 0.0.0.0
+      TTS_PORT: "8080"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${HF_REPOS_ROOT:?run ./setup.sh and use ./compose.sh}/ResembleAI/chatterbox-flash:/models:ro
+      - ./qwen-0.6-ryan-sample.wav:/voices/ryan.wav:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_CHATTERBOX_FLASH_GPU:-1}"]
+              capabilities: ["gpu"]
+
+  chatterbox-nano:
+    image: ${TTS_CHATTERBOX_IMAGE}
+    container_name: ai-voice-chatterbox-nano
+    restart: unless-stopped
+    ports:
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_CHATTERBOX_NANO_PORT:-11440}:8080"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      TTS_CANDIDATE_BACKEND: chatterbox-nano
+      TTS_MODEL_ALIAS: ${TTS_CHATTERBOX_NANO_MODEL_ALIAS:-chatterbox-nano}
+      TTS_MODEL_DIR: /models
+      TTS_REFERENCE_WAV: /voices/ryan.wav
+      TTS_SOURCE_REVISION: ${TTS_CHATTERBOX_NANO_SOURCE_REVISION}
+      TTS_MODEL_REVISION: ${TTS_CHATTERBOX_NANO_MODEL_REVISION}
+      TTS_HOST: 0.0.0.0
+      TTS_PORT: "8080"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${HF_REPOS_ROOT:?run ./setup.sh and use ./compose.sh}/ResembleAI/chatterbox-nano:/models:ro
+      - ./qwen-0.6-ryan-sample.wav:/voices/ryan.wav:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_CHATTERBOX_NANO_GPU:-1}"]
+              capabilities: ["gpu"]

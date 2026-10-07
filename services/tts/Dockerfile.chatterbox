@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim-bookworm
+
+ARG CHATTERBOX_REVISION=5de7a54aa4e5e2baadb0182dde554908b48b85c2
+ARG CHATTERBOX_FLASH_REVISION=74e05baa8ce574bf2cc571702391a21f1b0d48c5
+ARG PERTH_REVISION=ce86c49d029f42272c1902eccb675556b9ed2330
+ARG TORCH_VERSION=2.7.1
+ARG TORCHAUDIO_VERSION=2.7.1
+ARG TORCHVISION_VERSION=0.22.1
+ARG TORCH_CUDA_TAG=cu126
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ffmpeg git libsndfile1 espeak-ng \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install \
+      "torch==${TORCH_VERSION}" \
+      "torchaudio==${TORCHAUDIO_VERSION}" \
+      "torchvision==${TORCHVISION_VERSION}" \
+      --index-url "https://download.pytorch.org/whl/${TORCH_CUDA_TAG}"
+
+RUN git clone https://github.com/resemble-ai/chatterbox.git /opt/chatterbox \
+    && git -C /opt/chatterbox checkout "${CHATTERBOX_REVISION}" \
+    && git clone https://github.com/resemble-ai/chatterbox-flash.git /opt/chatterbox-flash \
+    && git -C /opt/chatterbox-flash checkout "${CHATTERBOX_FLASH_REVISION}"
+
+# Install the upstream projects without allowing their stale hard torch pins to
+# replace the Pascal-capable cu126 wheel. Install the remaining runtime deps from
+# each checked-in pyproject, excluding the unused Gradio UI and optional kernels.
+RUN python - <<'PY'
+import tomllib
+from pathlib import Path
+
+cases = [
+    (Path('/opt/chatterbox/pyproject.toml'), Path('/tmp/chatterbox-requirements.txt'), {
+        'torch', 'torchaudio', 'torchvision', 'gradio', 'resemble-perth',
+    }),
+    (Path('/opt/chatterbox-flash/pyproject.toml'), Path('/tmp/flash-requirements.txt'), {
+        'torch', 'torchaudio', 'torchvision', 'chatterbox-tts', 'flashinfer-python',
+    }),
+]
+for src, dst, blocked in cases:
+    deps = tomllib.loads(src.read_text())['project']['dependencies']
+    kept = []
+    for dep in deps:
+        name = dep.split(';', 1)[0].strip().split('@', 1)[0].strip()
+        for sep in '<>=!~[ ':
+            name = name.split(sep, 1)[0]
+        if name.lower() in blocked:
+            continue
+        kept.append(dep)
+    dst.write_text('\n'.join(kept) + '\n')
+PY
+RUN python -m pip install -r /tmp/chatterbox-requirements.txt \
+    && python -m pip install "git+https://github.com/resemble-ai/Perth.git@${PERTH_REVISION}" \
+    && python -m pip install --no-deps /opt/chatterbox \
+    && python -m pip install -r /tmp/flash-requirements.txt \
+    && python -m pip install --no-deps /opt/chatterbox-flash
+
+COPY services/tts/scripts/candidate_server.py /opt/local-ai/candidate_server.py
+WORKDIR /opt/local-ai
+ENTRYPOINT ["python", "/opt/local-ai/candidate_server.py"]

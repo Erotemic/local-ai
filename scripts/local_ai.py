@@ -325,6 +325,27 @@ def model_destination(model: dict[str, Any], env: dict[str, str]) -> Path:
     return Path(resolve(str(model["destination"]), env))
 
 
+MODEL_REVISION_MARKER = ".local-ai-revision"
+
+
+def expected_model_revision(model: dict[str, Any], env: dict[str, str]) -> str | None:
+    revision = model.get("revision")
+    if revision is None:
+        return None
+    return resolve(str(revision), env).strip() or None
+
+
+def model_revision_matches(model: dict[str, Any], env: dict[str, str]) -> bool:
+    expected = expected_model_revision(model, env)
+    if expected is None:
+        return True
+    marker = model_destination(model, env) / MODEL_REVISION_MARKER
+    try:
+        return marker.read_text().strip() == expected
+    except OSError:
+        return False
+
+
 def model_complete(model: dict[str, Any], env: dict[str, str]) -> bool:
     root = model_destination(model, env)
     for rel in model.get("check_files", []):
@@ -333,6 +354,8 @@ def model_complete(model: dict[str, Any], env: dict[str, str]) -> bool:
     for rel in model.get("check_dirs", []):
         if not (root / str(rel)).is_dir():
             return False
+    if not model_revision_matches(model, env):
+        return False
     if not model.get("check_files") and not model.get("check_dirs"):
         return root.exists() and any(root.iterdir()) if root.is_dir() else root.exists()
     return True
@@ -349,6 +372,10 @@ def model_missing(model: dict[str, Any], env: dict[str, str]) -> list[str]:
         path = root / str(rel)
         if not path.is_dir():
             missing.append(str(path) + "/")
+    expected = expected_model_revision(model, env)
+    if expected is not None and not model_revision_matches(model, env):
+        marker = root / MODEL_REVISION_MARKER
+        missing.append(f"{marker} (expected revision {expected})")
     return missing
 
 
@@ -469,9 +496,32 @@ def ensure_directories(manifest: dict[str, Any], env: dict[str, str]) -> None:
             ) from ex
 
 
-def build_service(service_dir: Path, manifest: dict[str, Any], env: dict[str, str]) -> None:
-    target = str(manifest["service"].get("compose_build_target", manifest["service"]["compose_service"]))
-    run_command(["docker", "compose", "build", target], cwd=service_dir, env=env)
+def build_targets_for_selection(
+    manifest: dict[str, Any], selected_models: set[str] | None = None
+) -> list[str]:
+    """Return compose build targets needed by the service and selected models."""
+    targets = [
+        str(manifest["service"].get("compose_build_target", manifest["service"]["compose_service"]))
+    ]
+    selected_models = selected_models or set()
+    for model in manifest.get("models", []):
+        if str(model["name"]) not in selected_models:
+            continue
+        target = model.get("compose_build_target")
+        if target and str(target) not in targets:
+            targets.append(str(target))
+    return targets
+
+
+def build_service(
+    service_dir: Path,
+    manifest: dict[str, Any],
+    env: dict[str, str],
+    *,
+    selected_models: set[str] | None = None,
+) -> None:
+    targets = build_targets_for_selection(manifest, selected_models)
+    run_command(["docker", "compose", "build", *targets], cwd=service_dir, env=env)
 
 
 def download_huggingface(model: dict[str, Any], service_dir: Path, env: dict[str, str]) -> None:
@@ -487,6 +537,9 @@ def download_huggingface(model: dict[str, Any], service_dir: Path, env: dict[str
         "--local-dir",
         str(destination),
     ]
+    revision = model.get("revision")
+    if revision:
+        args.extend(["--revision", resolve(str(revision), env)])
     include = [str(x) for x in model.get("include", [])]
     for pattern in include:
         # ``hf download --include`` accepts one pattern per option. Passing
@@ -497,6 +550,9 @@ def download_huggingface(model: dict[str, Any], service_dir: Path, env: dict[str
     download_env = dict(env)
     download_env["HF_XET_HIGH_PERFORMANCE"] = "1"
     run_command(args, cwd=service_dir, env=download_env)
+    expected_revision = expected_model_revision(model, env)
+    if expected_revision is not None:
+        (destination / MODEL_REVISION_MARKER).write_text(expected_revision + "\n")
 
 
 def download_compose(model: dict[str, Any], service_dir: Path, env: dict[str, str]) -> None:
@@ -640,7 +696,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
     run_command(["docker", "compose", "config", "--quiet"], cwd=service_dir, env=env)
 
     if not args.no_build:
-        build_service(service_dir, manifest, env)
+        build_service(service_dir, manifest, env, selected_models=selected)
 
     if not args.no_download:
         for model in manifest.get("models", []):
@@ -760,7 +816,7 @@ def cmd_model(args: argparse.Namespace) -> None:
         check_prerequisites()
         ensure_directories(manifest, env)
         if str(model["source"]) == "compose-command":
-            build_service(service_dir, manifest, env)
+            build_service(service_dir, manifest, env, selected_models={args.name})
         provision_model(model, service_dir, env)
         return
     raise AssertionError(args.model_action)
