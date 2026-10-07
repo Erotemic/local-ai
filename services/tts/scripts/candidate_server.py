@@ -56,6 +56,35 @@ def json_bytes(data: Any) -> bytes:
     return json.dumps(data, sort_keys=True).encode("utf8")
 
 
+def model_discovery_payload() -> dict[str, Any]:
+    """Describe the single model/voice exposed by this candidate endpoint."""
+    return {
+        "object": "list",
+        "data": [{
+            "id": MODEL_ALIAS,
+            "object": "model",
+            "owned_by": "local-ai",
+            "speakers": ["ryan"],
+            "default_voice": "ryan",
+        }],
+    }
+
+
+def voice_discovery_payload() -> dict[str, Any]:
+    """Return both common voice-list shapes used by OpenAI-style TTS clients."""
+    return {
+        "object": "list",
+        "default_voice": "ryan",
+        "voices": ["ryan"],
+        "data": [{
+            "id": "ryan",
+            "name": "ryan",
+            "model": MODEL_ALIAS,
+            "object": "voice",
+        }],
+    }
+
+
 def wav_bytes_from_float(samples: Any, sample_rate: int) -> bytes:
     arr = np.asarray(samples, dtype=np.float32).squeeze()
     if arr.ndim != 1:
@@ -329,10 +358,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/health":
             self.send_json(HTTPStatus.OK, {"status": "ok", "backend": BACKEND, "model": MODEL_ALIAS})
         elif self.path == "/v1/models":
-            self.send_json(HTTPStatus.OK, {
-                "object": "list",
-                "data": [{"id": MODEL_ALIAS, "object": "model", "owned_by": "local-ai"}],
-            })
+            self.send_json(HTTPStatus.OK, model_discovery_payload())
+        elif self.path in {"/v1/audio/voices", "/v1/voices"}:
+            self.send_json(HTTPStatus.OK, voice_discovery_payload())
         elif self.path == "/v1/runtime":
             self.send_json(HTTPStatus.OK, RUNTIME.metadata())
         else:

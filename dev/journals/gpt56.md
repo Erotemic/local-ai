@@ -1600,3 +1600,17 @@ and 60-90 s expected speech). The current evidence is already sufficient to
 keep Nano and Flash as serious Pascal deployment options; future work should
 focus on quality discrimination and long-form stability rather than basic GPU
 compatibility.
+
+### 2026-10-07: choose Chatterbox Flash for the interactive server
+
+After the cross-GPU comparison and direct listening, the deployment preference
+was narrowed from Nano/Flash to **Chatterbox Flash** for the primary interactive
+lecture endpoint. Nano remains the lower-latency fallback, but Flash's modest
+subjective quality advantage was considered worth its still-realtime Pascal
+cost (~0.734 repeat RTF on the GTX 1080 Ti).
+
+The Android reader should remain backend-agnostic. The candidate adapter now
+advertises its single retained `ryan` voice directly from `/v1/models` using
+`speakers=["ryan"]` and `default_voice="ryan"`, and also implements both
+`/v1/audio/voices` and `/v1/voices`. This matches the reader's existing generic
+discovery flow; no Chatterbox-specific Android code is required.

@@ -257,7 +257,10 @@ Provision them explicitly:
 
 Then run the reproducible hardware matrix described in
 [`EXPERIMENTS.md`](EXPERIMENTS.md). Every candidate exposes `/health`,
-`/v1/models`, `/v1/runtime`, and `/v1/audio/speech`. WAV and MP3 responses are
+`/v1/models`, `/v1/audio/voices`, `/v1/voices`, `/v1/runtime`, and
+`/v1/audio/speech`. `/v1/models` advertises the retained `ryan` voice through
+`speakers` and `default_voice`, so generic clients can discover the correct
+model/voice pair without backend-specific configuration. WAV and MP3 responses are
 supported; benchmarks deliberately request WAV so transport transcoding does not
 contaminate model RTF.
 
