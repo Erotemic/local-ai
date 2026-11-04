@@ -28,6 +28,7 @@ BACKEND = os.environ.get("TTS_CANDIDATE_BACKEND", "").strip()
 MODEL_ALIAS = os.environ.get("TTS_MODEL_ALIAS", BACKEND).strip()
 MODEL_DIR = Path(os.environ.get("TTS_MODEL_DIR", "/models"))
 REFERENCE_WAV = Path(os.environ.get("TTS_REFERENCE_WAV", "/voices/ryan.wav"))
+VOICES_DIR = Path(os.environ.get("TTS_VOICES_DIR", "/voices"))
 LANGUAGE = os.environ.get("TTS_LANGUAGE", "English")
 DTYPE_POLICY = os.environ.get("TTS_DTYPE", "auto").lower()
 SOURCE_REVISION = os.environ.get("TTS_SOURCE_REVISION", "unknown")
@@ -38,6 +39,77 @@ INDEX_AUX_REVISIONS = {
     "funasr/campplus": os.environ.get("TTS_INDEXTTS25_CAMPPLUS_REVISION", "unknown"),
     "nvidia/bigvgan_v2_22khz_80band_256x": os.environ.get("TTS_INDEXTTS25_BIGVGAN_REVISION", "unknown"),
 }
+
+
+def get_available_voices() -> list[str]:
+    voices = set()
+    if VOICES_DIR.is_dir():
+        for p in VOICES_DIR.glob("*.wav"):
+            voices.add(p.stem.lower())
+    if REFERENCE_WAV.is_file():
+        voices.add("ryan")
+    return sorted(voices) if voices else ["ryan"]
+
+
+def resolve_voice_files(voice_name: str) -> tuple[Path | None, str | None]:
+    clean_name = voice_name.lower().strip()
+    wav_path: Path | None = None
+    ref_text: str | None = None
+
+    # Check for <voicename>.wav and <voicename>.txt in voice-references
+    if VOICES_DIR.is_dir():
+        cand_wav = VOICES_DIR / f"{clean_name}.wav"
+        if cand_wav.is_file():
+            wav_path = cand_wav
+            cand_txt = VOICES_DIR / f"{clean_name}.txt"
+            if cand_txt.is_file():
+                try:
+                    ref_text = cand_txt.read_text(encoding="utf-8").strip()
+                except Exception:
+                    pass
+
+    # Fallback to default ryan.wav if not in voice-references
+    if wav_path is None and clean_name in {"ryan", "default"} and REFERENCE_WAV.is_file():
+        wav_path = REFERENCE_WAV
+        cand_txt = REFERENCE_WAV.with_suffix(".txt")
+        if cand_txt.is_file():
+            try:
+                ref_text = cand_txt.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
+
+    return wav_path, ref_text
+
+
+def model_discovery_payload() -> dict[str, Any]:
+    voices = get_available_voices()
+    return {
+        "object": "list",
+        "data": [{
+            "id": MODEL_ALIAS,
+            "object": "model",
+            "created": int(RUNTIME.loaded_at) if RUNTIME else int(time.time()),
+            "owned_by": "local-ai",
+            "speakers": voices,
+            "default_voice": "ryan" if "ryan" in voices else voices[0],
+        }],
+    }
+
+
+def voice_discovery_payload() -> dict[str, Any]:
+    voices = get_available_voices()
+    default_v = "ryan" if "ryan" in voices else voices[0]
+    return {
+        "object": "list",
+        "default_voice": default_v,
+        "voices": voices,
+        "data": [{
+            "id": v,
+            "name": v,
+            "model": MODEL_ALIAS,
+            "object": "voice",
+        } for v in voices],
+    }
 
 
 def index_bundle_revision_marker() -> str:
@@ -54,35 +126,6 @@ PORT = int(os.environ.get("TTS_PORT", "8080"))
 
 def json_bytes(data: Any) -> bytes:
     return json.dumps(data, sort_keys=True).encode("utf8")
-
-
-def model_discovery_payload() -> dict[str, Any]:
-    """Describe the single model/voice exposed by this candidate endpoint."""
-    return {
-        "object": "list",
-        "data": [{
-            "id": MODEL_ALIAS,
-            "object": "model",
-            "owned_by": "local-ai",
-            "speakers": ["ryan"],
-            "default_voice": "ryan",
-        }],
-    }
-
-
-def voice_discovery_payload() -> dict[str, Any]:
-    """Return both common voice-list shapes used by OpenAI-style TTS clients."""
-    return {
-        "object": "list",
-        "default_voice": "ryan",
-        "voices": ["ryan"],
-        "data": [{
-            "id": "ryan",
-            "name": "ryan",
-            "model": MODEL_ALIAS,
-            "object": "voice",
-        }],
-    }
 
 
 def wav_bytes_from_float(samples: Any, sample_rate: int) -> bytes:
@@ -301,9 +344,15 @@ class Runtime:
         requested_model = str(body.get("model", MODEL_ALIAS))
         if requested_model not in {MODEL_ALIAS, BACKEND}:
             raise ValueError(f"model {requested_model!r} is not served here; use {MODEL_ALIAS!r}")
+
         voice = str(body.get("voice", "ryan")).lower()
-        if voice not in {"ryan", "default"}:
-            raise ValueError("this experiment server exposes only the retained Ryan reference voice")
+        wav_path, ref_text_from_file = resolve_voice_files(voice)
+        if wav_path is None:
+            available = get_available_voices()
+            raise ValueError(
+                f"voice {voice!r} not found. Place {voice}.wav in {VOICES_DIR} (available: {', '.join(available)})"
+            )
+
         seed = body.get("seed")
         if seed is not None:
             seed = int(seed)
@@ -354,7 +403,6 @@ class Runtime:
                 finally:
                     out_path.unlink(missing_ok=True)
             if BACKEND == "breeze-tts2":
-                import torchaudio
                 from breeze_infer.templates import get_template, prepare_inputs, select_template_name
 
                 request = {
@@ -363,23 +411,22 @@ class Runtime:
                     "speaker": str(body.get("speaker", "S0")),
                 }
 
-                # Optional voice instruction (Direction or Design)
+                # Optional voice direction or voice design instruction
                 instruction = body.get("instruction") or body.get("voice_direction") or body.get("direction")
                 if instruction:
                     request["instruction"] = str(instruction)
 
-                # Reference audio conditioning (Voice Clone / Voice Direction)
-                if REFERENCE_WAV.exists():
-                    ref_audio, sr = torchaudio.load(str(REFERENCE_WAV))
-                    if sr != 24000:
-                        ref_audio = torchaudio.functional.resample(ref_audio, sr, 24000)
-                    if ref_audio.shape[0] > 1:
-                        ref_audio = ref_audio.mean(dim=0, keepdim=True)
-                    request["ref_audio"] = ref_audio.squeeze(0).numpy()
-
-                    ref_text = body.get("ref_text")
-                    if ref_text:
-                        request["ref_text"] = str(ref_text)
+                # Reference audio and transcript from <voice>.wav and <voice>.txt
+                if wav_path and wav_path.is_file():
+                    ref_text = body.get("ref_text") or ref_text_from_file
+                    if not ref_text:
+                        raise ValueError(
+                            f"voice {voice!r} has reference audio but no transcript. "
+                            f"Create {wav_path.stem}.txt or pass 'ref_text' in request."
+                        )
+                    # Breeze requires 'ref_audio_path' and 'ref_text' together
+                    request["ref_audio_path"] = str(wav_path)
+                    request["ref_text"] = str(ref_text)
 
                 template_name = select_template_name(request)
                 inputs = prepare_inputs(
@@ -411,6 +458,7 @@ class Runtime:
                     audio_np = np.asarray(output_audio, dtype=np.float32)
 
                 return wav_bytes_from_float(audio_np, self.sample_rate)
+
         raise AssertionError(BACKEND)
 
 

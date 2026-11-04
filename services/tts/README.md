@@ -285,7 +285,6 @@ For Breeze:
 curl -s http://127.0.0.1:8812/health
 curl -s http://127.0.0.1:8812/v1/runtime
 
-
 curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
@@ -295,3 +294,27 @@ curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
     "response_format": "wav"
   }' \
   --output test-breeze.wav
+
+curl -s http://127.0.0.1:8812/v1/audio/voices | python3 -m json.tool
+
+curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "breeze-tts2",
+    "input": "This is a direct test of the Breeze TTS 2 voice clone running on my local RTX 3090.",
+    "voice": "crall-math-dk",
+    "response_format": "wav"
+  }' \
+  --output test-crall.wav && python3 scripts/audio_sanity.py test-crall.wav
+
+
+curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "breeze-tts2",
+    "input": "(laugh) That algorithm converges surprisingly fast once the parameters are set correctly.",
+    "voice": "crall-math-dk",
+    "instruction": "Speak in an enthusiastic, engaging lecture style with clear articulation.",
+    "response_format": "wav"
+  }' \
+  --output test-crall-lecture.wav

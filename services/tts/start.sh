@@ -23,19 +23,17 @@ for key in "${!inherited_overrides[@]}"; do export "$key=${inherited_overrides[$
 
 backend="${TTS_ACTIVE_BACKEND:-qwentts}"
 case "$backend" in
-  qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano) ;;
+  qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2) ;;
   *)
     echo "ERROR: unsupported TTS_ACTIVE_BACKEND=$backend" >&2
     exit 2
     ;;
 esac
 
-# Normal operation is exclusive so the 1080 Ti never accumulates stale resident
-# models. Direct start-* scripts remain available for controlled side-by-side
-# experiments on multi-GPU hosts.
+# Add breeze-tts2 to the cleanup list so it is shut down when switching models:
 "$SERVICE_DIR/compose.sh" stop \
   qwentts-gateway qwentts kokoro-gpu kokoro-cpu \
-  indextts25 chatterbox-flash chatterbox-nano >/dev/null 2>&1 || true
+  indextts25 chatterbox-flash chatterbox-nano breeze-tts2 >/dev/null 2>&1 || true
 
 echo "Starting active TTS backend: $backend"
 case "$backend" in
@@ -45,4 +43,5 @@ case "$backend" in
   indextts25) exec "$SERVICE_DIR/start-indextts25.sh" ;;
   chatterbox-flash) exec "$SERVICE_DIR/start-chatterbox-flash.sh" ;;
   chatterbox-nano) exec "$SERVICE_DIR/start-chatterbox-nano.sh" ;;
+  breeze-tts2) exec "$SERVICE_DIR/start-candidate.sh" breeze-tts2 ;;
 esac

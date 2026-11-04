@@ -69,7 +69,7 @@ case "${TTS_ACTIVE_BACKEND:-qwentts}" in
   kokoro-cpu)
     "$SERVICE_DIR/compose.sh" pull kokoro-cpu
     ;;
-  indextts25|chatterbox-flash|chatterbox-nano)
+  indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2)
     # Candidate images are local builds selected by their model bundle. Their
     # weights were provisioned above; no registry pull is needed here.
     ;;
