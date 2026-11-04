@@ -47,8 +47,15 @@ case "$backend" in
     port="${TTS_CHATTERBOX_NANO_PORT:-11440}"
     timeout_s="${TTS_CHATTERBOX_NANO_START_TIMEOUT:-600}"
     ;;
+  breeze-tts2)
+    service="breeze-tts2"
+    bundle="breeze-tts2"
+    container="ai-voice-breeze-tts2"
+    port="${TTS_BREEZE_PORT:-11441}"
+    timeout_s="${TTS_BREEZE_START_TIMEOUT:-600}"
+    ;;
   *)
-    echo "usage: $0 [indextts25|chatterbox-flash|chatterbox-nano]" >&2
+    echo "usage: $0 [indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2]" >&2
     exit 2
     ;;
 esac

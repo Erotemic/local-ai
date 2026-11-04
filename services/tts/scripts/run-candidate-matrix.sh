@@ -11,7 +11,7 @@ if [[ -n "$gpu" ]]; then
   export TTS_CHATTERBOX_NANO_GPU="$gpu"
 fi
 
-backends=(chatterbox-nano chatterbox-flash indextts25)
+backends=(chatterbox-nano chatterbox-flash indextts25 breeze-tts2)
 for backend in "${backends[@]}"; do
   echo "===== $backend ====="
   start_epoch="$(python3 -c 'import time; print(time.time())')"

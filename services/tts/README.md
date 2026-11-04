@@ -92,14 +92,14 @@ Example:
 curl http://127.0.0.1:11437/v1/audio/speech \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "qwen-0.6-customvoice-q8-ggml",
-    "input": "This is a local Qwen text to speech test.",
+    "model": "qwen-1.7-customvoice-q8-ggml",
+    "input": "This is a local Qwen text to speech test. It tends to work better when the input is longer.",
     "voice": "ryan",
     "language": "English",
     "response_format": "mp3",
     "stream": false
   }' \
-  --output qwen-test.mp3
+  --output qwen-test2.mp3
 ```
 
 ## Kokoro GPU
@@ -272,3 +272,26 @@ TTS_MODEL_BUNDLES=qwen-0.6-customvoice-q8-gguf
 
 Existing `TTS_QWENTTS_MODELS` configuration is migrated automatically by
 `setup.sh`.
+
+
+### Tests
+
+For Breeze:
+
+./compose.sh build breeze-tts2
+./setup.sh --with-model breeze-tts2
+./start-candidate.sh breeze-tts2
+
+curl -s http://127.0.0.1:8812/health
+curl -s http://127.0.0.1:8812/v1/runtime
+
+
+curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "breeze-tts2",
+    "input": "This is a direct benchmark test of Breeze TTS 2 on the RTX 3090.",
+    "voice": "ryan",
+    "response_format": "wav"
+  }' \
+  --output test-breeze.wav

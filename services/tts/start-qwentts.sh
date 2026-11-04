@@ -62,7 +62,7 @@ if ! [[ "$timeout_s" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 model_root="${HF_REPOS_ROOT:-/data/services/hf-repos}/Serveurperso/Qwen3-TTS-GGUF"
-model_file="${TTS_QWENTTS_MODEL_FILE:-qwen-talker-0.6b-customvoice-Q8_0.gguf}"
+model_file="${TTS_QWENTTS_MODEL_FILE:-qwen-talker-1.7b-customvoice-Q8_0.gguf}"
 codec_file="${TTS_QWENTTS_CODEC_FILE:-qwen-tokenizer-12hz-Q8_0.gguf}"
 missing=()
 [[ -f "$model_root/$model_file" ]] || missing+=("$model_root/$model_file")

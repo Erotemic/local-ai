@@ -252,3 +252,48 @@ services:
             - driver: nvidia
               device_ids: ["${TTS_CHATTERBOX_NANO_GPU:-1}"]
               capabilities: ["gpu"]
+
+  breeze-tts2:
+    build:
+      context: ../..
+      dockerfile: services/tts/Dockerfile.breeze
+      args:
+        BREEZE_SOURCE_REVISION: ${TTS_BREEZE_SOURCE_REVISION}
+        TORCH_VERSION: ${TTS_EXPERIMENT_TORCH_VERSION:-2.7.1}
+        TORCHAUDIO_VERSION: ${TTS_EXPERIMENT_TORCHAUDIO_VERSION:-2.7.1}
+        TORCHVISION_VERSION: ${TTS_EXPERIMENT_TORCHVISION_VERSION:-0.22.1}
+        TORCH_CUDA_TAG: ${TTS_EXPERIMENT_TORCH_CUDA_TAG:-cu126}
+    image: local/tts-breeze-tts2:candidate
+    container_name: ai-voice-breeze-tts2
+    restart: unless-stopped
+    ports:
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_BREEZE_PORT:-11441}:8080"
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      TTS_CANDIDATE_BACKEND: breeze-tts2
+      TTS_MODEL_ALIAS: ${TTS_BREEZE_MODEL_ALIAS:-breeze-tts2}
+      TTS_MODEL_DIR: /models
+      TTS_REFERENCE_WAV: /voices/ryan.wav
+      TTS_DTYPE: ${TTS_BREEZE_DTYPE:-bfloat16}
+      TTS_SOURCE_REVISION: ${TTS_BREEZE_SOURCE_REVISION}
+      TTS_MODEL_REVISION: ${TTS_BREEZE_MODEL_REVISION}
+      TTS_HOST: 0.0.0.0
+      TTS_PORT: "8080"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${HF_REPOS_ROOT:?run ./setup.sh and use ./compose.sh}/BreezeBlue/Breeze-TTS-2:/models:ro
+      - ./qwen-0.6-ryan-sample.wav:/voices/ryan.wav:ro
+      - ./scripts/candidate_server.py:/opt/local-ai/candidate_server.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_BREEZE_GPU:-1}"]
+              capabilities: ["gpu"]

@@ -59,6 +59,15 @@ case "$backend" in
     dtype="upstream-default"; gpu="${TTS_CHATTERBOX_NANO_GPU:-}"; runtime_container="ai-voice-chatterbox-nano"
     runtime_image="${TTS_CHATTERBOX_IMAGE:-local/chatterbox-experiments:cu126}"
     ;;
+  breeze-tts2)
+    base_url="http://${host}:${TTS_BREEZE_PORT:-11441}"
+    model="${TTS_BREEZE_MODEL_ALIAS:-breeze-tts2}"
+    voice="ryan"
+    dtype="bfloat16"
+    gpu="${TTS_BREEZE_GPU:-1}"
+    runtime_container="ai-voice-breeze-tts2"
+    runtime_image="local/tts-breeze-tts2:candidate"
+    ;;
   *)
     echo "usage: $0 [qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano] [runs]" >&2
     exit 2

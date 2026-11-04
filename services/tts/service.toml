@@ -71,6 +71,9 @@ required = [
   "TTS_BENCH_QWENTTS_VOICE",
   "TTS_BENCH_KOKORO_MODEL",
   "TTS_BENCH_KOKORO_VOICE",
+  "TTS_BREEZE_PORT",
+  "TTS_BREEZE_GPU",
+  "TTS_BREEZE_MODEL_ALIAS",
 ]
 
 [defaults]
@@ -191,4 +194,23 @@ check_files = [
   "merges.txt",
   "special_tokens_map.json",
   "conds.pt",
+]
+
+[[models]]
+name = "breeze-tts2"
+label = "Breeze TTS 2 (BreezeBlue)"
+required = false
+source = "huggingface"
+source_label = "hf://BreezeBlue/Breeze-TTS-2@{TTS_BREEZE_MODEL_REVISION}"
+repository = "BreezeBlue/Breeze-TTS-2"
+revision = "{TTS_BREEZE_MODEL_REVISION}"
+destination = "{HF_REPOS_ROOT}/BreezeBlue/Breeze-TTS-2"
+container_path = "/models"
+compose_build_target = "breeze-tts2"
+check_files = [
+  "config.json",
+  "generation_config.json",
+  "model.safetensors.index.json",
+  "model-00001-of-00002.safetensors",
+  "model-00002-of-00002.safetensors",
 ]

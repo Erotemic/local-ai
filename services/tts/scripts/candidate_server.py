@@ -244,6 +244,28 @@ class Runtime:
                 "use_torch_compile": False,
                 "use_qwen_emo": False,
             })
+        elif BACKEND == "breeze-tts2":
+            from breeze_infer.runtime import load_runtime, update_generation_config_for_breeze
+            # print(f'{help(load_runtime)=}')
+
+            # Breeze requires an explicit device index like "cuda:0" for torch.cuda.set_device
+            target_device = "cuda:0" if self.device.startswith("cuda") else self.device
+
+            self.tokenizer, self.model, self.audio_tokenizer = load_runtime(
+                Path(MODEL_DIR),
+                device=target_device,
+                attn_implementation="eager",
+            )
+            if self.dtype and hasattr(self.model, "to"):
+                self.model = self.model.to(self.dtype)
+
+            update_generation_config_for_breeze(self.model)
+            self.sample_rate = 24000
+            self.extra.update({
+                "pipeline": "breeze_infer",
+                "reference_conditioned": REFERENCE_WAV.exists(),
+                "default_speaker": "S0",
+            })
         else:
             raise RuntimeError(f"unknown TTS_CANDIDATE_BACKEND={BACKEND!r}")
 
@@ -331,6 +353,64 @@ class Runtime:
                     return out_path.read_bytes()
                 finally:
                     out_path.unlink(missing_ok=True)
+            if BACKEND == "breeze-tts2":
+                import torchaudio
+                from breeze_infer.templates import get_template, prepare_inputs, select_template_name
+
+                request = {
+                    "id": f"req-{int(time.time() * 1000)}",
+                    "text": text,
+                    "speaker": str(body.get("speaker", "S0")),
+                }
+
+                # Optional voice instruction (Direction or Design)
+                instruction = body.get("instruction") or body.get("voice_direction") or body.get("direction")
+                if instruction:
+                    request["instruction"] = str(instruction)
+
+                # Reference audio conditioning (Voice Clone / Voice Direction)
+                if REFERENCE_WAV.exists():
+                    ref_audio, sr = torchaudio.load(str(REFERENCE_WAV))
+                    if sr != 24000:
+                        ref_audio = torchaudio.functional.resample(ref_audio, sr, 24000)
+                    if ref_audio.shape[0] > 1:
+                        ref_audio = ref_audio.mean(dim=0, keepdim=True)
+                    request["ref_audio"] = ref_audio.squeeze(0).numpy()
+
+                    ref_text = body.get("ref_text")
+                    if ref_text:
+                        request["ref_text"] = str(ref_text)
+
+                template_name = select_template_name(request)
+                inputs = prepare_inputs(
+                    self.tokenizer,
+                    self.audio_tokenizer,
+                    self.model,
+                    [request],
+                    get_template(template_name),
+                    guidance_scale=float(body.get("cfg_scale", 1.0 if not instruction else 4.0)),
+                    guidance_scale_ref=None,
+                    guidance_scale_ins=None,
+                )
+
+                target_device = getattr(self, "target_device", self.device)
+                inputs = {k: v.to(target_device) if hasattr(v, "to") else v for k, v in inputs.items()}
+
+                output_audio = self.model.generate(
+                    **inputs,
+                    output_audio=True,
+                    audio_tokenizer=self.audio_tokenizer,
+                    repetition_penalty=float(body.get("repetition_penalty", 1.1)),
+                )
+
+                if hasattr(output_audio, "detach"):
+                    audio_np = output_audio.detach().cpu().numpy()
+                elif hasattr(output_audio, "numpy"):
+                    audio_np = output_audio.numpy()
+                else:
+                    audio_np = np.asarray(output_audio, dtype=np.float32)
+
+                return wav_bytes_from_float(audio_np, self.sample_rate)
         raise AssertionError(BACKEND)
 
 

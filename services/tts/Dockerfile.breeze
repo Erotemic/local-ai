@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim-bookworm
+
+ARG BREEZE_SOURCE_REVISION=daa6cb2efe5471f09369229f322d20bb956cb3c3
+ARG TORCH_VERSION=2.7.1
+ARG TORCHAUDIO_VERSION=2.7.1
+ARG TORCHVISION_VERSION=0.22.1
+ARG TORCH_CUDA_TAG=cu126
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ffmpeg git libsndfile1 espeak-ng libsoxr-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install \
+      "torch==${TORCH_VERSION}" \
+      "torchaudio==${TORCHAUDIO_VERSION}" \
+      "torchvision==${TORCHVISION_VERSION}" \
+      --index-url "https://download.pytorch.org/whl/${TORCH_CUDA_TAG}"
+
+# Clone and checkout pinned revision
+RUN git clone https://github.com/breezeblue-ai/breeze-tts.git /opt/breeze-tts \
+    && git -C /opt/breeze-tts checkout "${BREEZE_SOURCE_REVISION}"
+
+# Strip torch/torchaudio pins so pip preserves the CUDA 12.6 stack
+RUN python - <<'PY'
+import pathlib
+src = pathlib.Path('/opt/breeze-tts/requirements.txt')
+dst = pathlib.Path('/tmp/breeze-requirements.txt')
+lines = [l for l in src.read_text().splitlines() if not any(l.strip().startswith(x) for x in ['torch', 'torchaudio', 'torchvision'])]
+dst.write_text('\n'.join(lines) + '\n')
+PY
+
+# Install dependencies from requirements.txt
+RUN python -m pip install -r /tmp/breeze-requirements.txt
+
+# Add the repo root to PYTHONPATH so `import breeze_infer` resolves
+ENV PYTHONPATH="/opt/breeze-tts:${PYTHONPATH}"
+
+COPY services/tts/scripts/candidate_server.py /opt/local-ai/candidate_server.py
+WORKDIR /opt/local-ai
+ENTRYPOINT ["python", "/opt/local-ai/candidate_server.py"]
