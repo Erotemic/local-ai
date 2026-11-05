@@ -15,6 +15,34 @@ Opt-in candidates: **IndexTTS 2.5**, **Chatterbox Flash**, and **Chatterbox Nano
 There is intentionally no Wavhost layer. `local-ai` owns deployment and backend
 selection directly.
 
+## Quick start: Breeze and Kokoro together
+
+From `services/tts/`, provision both backends, then start each without
+stopping the other. Setup downloads the selected weights and images; startup
+uses the provisioned files.
+
+```bash
+TTS_ACTIVE_BACKEND=breeze-tts2 ./setup.sh
+TTS_ACTIVE_BACKEND=kokoro-cpu ./setup.sh
+TTS_ACTIVE_BACKEND=breeze-tts2 ./start.sh --keep-running
+TTS_ACTIVE_BACKEND=kokoro-cpu ./start.sh --keep-running
+TTS_ACTIVE_BACKEND=breeze-tts2 ./test.sh --voice crall-math-dk
+TTS_ACTIVE_BACKEND=kokoro-cpu ./test.sh
+```
+
+Use a voice available on your server in place of `crall-math-dk`. Breeze and
+Kokoro CPU use ports 11441 and 8881 by default; `.env` can override these.
+Kokoro GPU is a separate service on port 8880. Substitute `kokoro-gpu` in the
+commands to use it, and stop it with `./compose.sh stop kokoro-gpu`. Use
+`./compose.sh ps` to see running backends. Plain `./start.sh` stops the other
+backends; `--keep-running` preserves them.
+
+For Breeze's optional CUDA-graph path, set `TTS_BREEZE_FAST=1` when starting
+it or in the service `.env`. Restarting replaces the Breeze container and
+interrupts in-flight requests. Check `/v1/runtime` for `"breeze_fast": true`;
+startup and first requests for new prompt sizes may need graph warmup. See the
+benchmark notes below before comparing speed and audio quality.
+
 ## Endpoints
 
 Default host ports are:
@@ -27,6 +55,8 @@ Kokoro-FastAPI CPU           8881
 IndexTTS 2.5                 11438
 Chatterbox Flash             11439
 Chatterbox Nano              11440
+Breeze TTS 2                 11441
+Fish Audio S2 Pro            11442
 ```
 
 The qwentts gateway is the normal client endpoint. It proxies discovery,
