@@ -8,5 +8,4 @@ if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
   exit 1
 fi
 "$SERVICE_DIR/compose.sh" config --quiet
-"$SERVICE_DIR/compose.sh" pull kokoro-gpu
 exec "$SERVICE_DIR/compose.sh" up -d --no-build --pull never kokoro-gpu

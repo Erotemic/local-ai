@@ -3,6 +3,7 @@ set -euo pipefail
 SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SERVICE_DIR/../.." && pwd)"
 SERVICE_ENV="$SERVICE_DIR/.env"
+inherited_backend="${TTS_ACTIVE_BACKEND-}"
 
 # Schema v7 adds generic model bundles and candidate TTS experiments. Migrate
 # the old qwentts-only bundle key before the generic config refresher runs.
@@ -58,6 +59,9 @@ source "$ROOT_DIR/.env"
 # shellcheck disable=SC1091
 source "$SERVICE_DIR/.env"
 set +a
+if [[ -n "$inherited_backend" ]]; then
+  export TTS_ACTIVE_BACKEND="$inherited_backend"
+fi
 
 case "${TTS_ACTIVE_BACKEND:-qwentts}" in
   qwentts)

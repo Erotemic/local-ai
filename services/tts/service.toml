@@ -84,6 +84,8 @@ TTS_DATA_ROOT = "{LOCAL_AI_SERVICE_ROOT}/tts"
 
 [model_selection]
 env = "TTS_MODEL_BUNDLES"
+backend_env = "TTS_ACTIVE_BACKEND"
+backend_bundles = { qwentts = "qwen-0.6-customvoice-q8-gguf", indextts25 = "indextts-2.5", chatterbox-flash = "chatterbox-flash", chatterbox-nano = "chatterbox-nano", breeze-tts2 = "breeze-tts2", fish-s2-pro = "fish-s2-pro" }
 
 [[directories]]
 label = "TTS service state"

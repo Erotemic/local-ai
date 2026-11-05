@@ -317,6 +317,12 @@ def selected_model_names(manifest: dict[str, Any], env: dict[str, str], extra: l
     if selection_var:
         raw = env.get(str(selection_var), "")
         selected.update(item.strip() for item in raw.split(",") if item.strip())
+    selection = manifest.get("model_selection", {})
+    backend_var = selection.get("backend_env")
+    if backend_var:
+        bundle = selection.get("backend_bundles", {}).get(env.get(str(backend_var), ""))
+        if bundle:
+            selected.add(str(bundle))
     selected.update(extra)
     return selected
 

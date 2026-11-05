@@ -120,6 +120,7 @@ TTS_ACTIVE_BACKEND=kokoro-gpu
 or start it once without changing `.env`:
 
 ```bash
+TTS_ACTIVE_BACKEND=kokoro-gpu ./setup.sh
 TTS_ACTIVE_BACKEND=kokoro-gpu ./start.sh
 ```
 
@@ -153,6 +154,7 @@ TTS_ACTIVE_BACKEND=kokoro-cpu
 or:
 
 ```bash
+TTS_ACTIVE_BACKEND=kokoro-cpu ./setup.sh
 TTS_ACTIVE_BACKEND=kokoro-cpu ./start.sh
 ```
 
@@ -176,7 +178,25 @@ kokoro-cpu
 indextts25
 chatterbox-flash
 chatterbox-nano
+breeze-tts2
+fish-s2-pro
 ```
+
+To keep Breeze running while starting Kokoro on its separate port, provision
+both backends first, then use `--keep-running`:
+
+```bash
+TTS_ACTIVE_BACKEND=breeze-tts2 ./setup.sh
+TTS_ACTIVE_BACKEND=kokoro-gpu ./setup.sh
+TTS_ACTIVE_BACKEND=breeze-tts2 ./start.sh --keep-running
+TTS_ACTIVE_BACKEND=kokoro-gpu ./start.sh --keep-running
+TTS_ACTIVE_BACKEND=breeze-tts2 ./test.sh --voice crall-math-dk
+TTS_ACTIVE_BACKEND=kokoro-gpu ./test.sh
+```
+
+Without `--keep-running`, `start.sh` stops other TTS backends. Both GPU
+backends share the GPU and need enough free VRAM. Use `kokoro-cpu` instead if
+desired. Direct backend start scripts also leave other backends running.
 
 Direct experiment starts are also available:
 
@@ -374,3 +394,12 @@ profile are captured on first use, so the first request can include additional
 graph capture time. Listen to the output as well as comparing
 RTF and peak GPU memory with the eager baseline. Set
 `TTS_BREEZE_FAST_START_TIMEOUT` if warmup needs more than 1800 seconds.
+
+### Speech smoke test
+
+After starting the service, run `./test.sh` to synthesize speech and check the
+returned WAV for a plausible duration and audio level. The test discovers the
+model and default voice where available. Use `./test.sh --voice crall-math-dk
+--output test-crall.wav` to select a voice and retain the audio for listening.
+`--model`, `--text`, and `--timeout` can also override the defaults. The test
+checks the configured active backend and honors `TTS_*` environment overrides.

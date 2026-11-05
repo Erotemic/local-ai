@@ -3,6 +3,16 @@ set -euo pipefail
 SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SERVICE_DIR/../.." && pwd)"
 
+keep_running=false
+if [[ ${1:-} == "--keep-running" ]]; then
+  keep_running=true
+  shift
+fi
+if (( $# )); then
+  echo "Usage: $0 [--keep-running]" >&2
+  exit 2
+fi
+
 if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
   echo "ERROR: service configuration is not initialized." >&2
   echo "Run ./setup.sh from $SERVICE_DIR" >&2
@@ -30,10 +40,11 @@ case "$backend" in
     ;;
 esac
 
-# Add breeze-tts2 to the cleanup list so it is shut down when switching models:
-"$SERVICE_DIR/compose.sh" stop \
-  qwentts-gateway qwentts kokoro-gpu kokoro-cpu \
-  indextts25 chatterbox-flash chatterbox-nano breeze-tts2 fish-s2-pro >/dev/null 2>&1 || true
+if ! $keep_running; then
+  "$SERVICE_DIR/compose.sh" stop \
+    qwentts-gateway qwentts kokoro-gpu kokoro-cpu \
+    indextts25 chatterbox-flash chatterbox-nano breeze-tts2 fish-s2-pro >/dev/null 2>&1 || true
+fi
 
 echo "Starting active TTS backend: $backend"
 case "$backend" in
