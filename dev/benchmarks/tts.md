@@ -82,3 +82,23 @@ The CSV preserves one 3090 Wavhost run whose dtype chronology was ambiguous.
 Those rows have `use_for_summary=no` and `confidence=low`. They are retained so
 future archeology does not rediscover the numbers and mistake them for a missing
 experiment.
+
+## Breeze and Fish on RTX 3090: 2026-11-04
+
+These experiments used the same lecture text, `crall-math-dk` reference and
+seed 42. Each has one first request and two repeats. The WAVs passed mechanical
+checks; listening review and Pascal validation remain pending.
+
+| Runtime / model | Mode | Repeat RTF | Approx. throughput | Startup | Peak allocated / reserved GPU memory |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Breeze TTS 2 | eager | 3.4977 | 0.29x realtime | 46.4 s | 8.36 / 9.30 GiB |
+| Breeze TTS 2 | fast-all CUDA graphs | 0.5404 | 1.85x realtime | 76.6 s | 9.04 / 15.96 GiB |
+| Fish S2 Pro | upstream default | 1.9785 | 0.51x realtime | 88.6 s | 20.20 / 20.27 GiB |
+
+Breeze fast mode improves repeat RTF by about 6.5x in this small sample;
+output durations differ, so this is an end-to-end comparison. Its first
+request can capture prompt-size graphs absent from the initial warmup. The
+Fish startup includes upstream inference warmup. These results use BF16 on the
+3090 and do not establish speech quality or 1080 Ti compatibility. Raw rows,
+artifact paths and timings are in the CSV; the experiment history is in the
+journal.

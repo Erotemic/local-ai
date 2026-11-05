@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential ffmpeg git libsndfile1 espeak-ng libsoxr-dev \
+      build-essential ffmpeg git libsndfile1 espeak-ng libsoxr-dev sox \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python -m pip install --upgrade pip setuptools wheel \
@@ -37,6 +37,22 @@ PY
 
 # Install dependencies from requirements.txt
 RUN python -m pip install -r /tmp/breeze-requirements.txt
+
+# Use the upstream prebuilt wheel for the default PyTorch/CUDA stack. Flash
+# Attention is optional; other stacks continue to use PyTorch attention.
+RUN python - <<'PY'
+import platform
+import subprocess
+import torch
+
+if platform.machine() == 'x86_64' and torch.__version__.split('+')[0].startswith('2.7.') and (torch.version.cuda or '').startswith('12.'):
+    abi = 'TRUE' if torch._C._GLIBCXX_USE_CXX11_ABI else 'FALSE'
+    wheel = f'flash_attn-2.8.3+cu12torch2.7cxx11abi{abi}-cp311-cp311-linux_x86_64.whl'
+    url = f'https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/{wheel}'
+    subprocess.run(['python', '-m', 'pip', 'install', '--no-deps', url], check=True)
+else:
+    print('FlashAttention wheel unavailable for this stack; using PyTorch attention.', flush=True)
+PY
 
 # Add the repo root to PYTHONPATH so `import breeze_infer` resolves
 ENV PYTHONPATH="/opt/breeze-tts:${PYTHONPATH}"

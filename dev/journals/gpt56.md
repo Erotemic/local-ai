@@ -1614,3 +1614,40 @@ advertises its single retained `ryan` voice directly from `/v1/models` using
 `speakers=["ryan"]` and `default_voice="ryan"`, and also implements both
 `/v1/audio/voices` and `/v1/voices`. This matches the reader's existing generic
 discovery flow; no Chatterbox-specific Android code is required.
+
+### 2026-11-04: Breeze and Fish S2 Pro on RTX 3090
+
+On `toothbrush` physical GPU 0, the candidate benchmark used the standard
+lecture passage, `crall-math-dk` reference WAV and transcript, seed 42, and
+three requests per model. Both models reported BF16 and an sm_86-compatible
+PyTorch build. The first request is not labeled cold; caches were not reset.
+All outputs passed mechanical WAV checks. Listening review remains pending.
+
+| Model / mode | First RTF | Repeat RTFs | Startup | Peak allocated / reserved |
+| --- | ---: | --- | ---: | ---: |
+| Breeze eager | 4.5595 | 3.4250, 3.5704 | 46.444 s | 8.36 / 9.30 GiB |
+| Fish S2 Pro | 2.0533 | 2.0156, 1.9413 | 88.563 s | 20.20 / 20.27 GiB |
+| Breeze fast-all | 0.6119 | 0.5441, 0.5366 | 76.566 s | 9.04 / 15.96 GiB |
+
+Breeze fast repeat mean RTF was 0.5404 versus 3.4977 eager, roughly 6.5x
+faster by RTF; generated durations varied. The fast path uses upstream CUDA
+graphs and compilation while retaining eager attention. Its warmup allows new
+prompt graph sizes to be captured on first use. An earlier fast attempt failed
+because the upstream frozen profile omitted prefill bucket `(1, 320)`; that
+failed session is retained separately. The fast and eager image IDs differ,
+so this is an end-to-end configuration comparison, not an isolated kernel
+measurement. Startup measurements include readiness; Fish performs an upstream
+warmup, and Breeze fast performs graph warmup. No inference is made about
+subjective quality or Pascal compatibility.
+
+Artifacts:
+
+```text
+/data/local-ai/services/tts/benchmarks/20261104T175515Z-3090-efT2Hy
+/data/local-ai/services/tts/benchmarks/20261104T221140Z-breeze-fast-3090-UFzCkp  # failed frozen profile
+/data/local-ai/services/tts/benchmarks/20261104T230024Z-breeze-fast-3090-d7XeVt
+```
+
+Each successful model directory contains request and runtime metadata, audio,
+sanity checks, timings and a listening checklist. Per-request data is also in
+`dev/benchmarks/tts_measurements.csv`.

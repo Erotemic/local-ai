@@ -7,12 +7,17 @@ if [[ ! -f "$ROOT_DIR/.env" || ! -f "$SERVICE_DIR/.env" ]]; then
   echo "ERROR: run ../setup.sh first." >&2
   exit 1
 fi
+declare -A inherited_overrides=()
+while IFS='=' read -r key value; do
+  case "$key" in TTS_*) inherited_overrides["$key"]="$value" ;; esac
+done < <(env)
 set -a
 # shellcheck disable=SC1091
 source "$ROOT_DIR/.env"
 # shellcheck disable=SC1091
 source "$SERVICE_DIR/.env"
 set +a
+for key in "${!inherited_overrides[@]}"; do export "$key=${inherited_overrides[$key]}"; done
 
 backend="${1:-qwentts}"
 runs="${2:-3}"
@@ -62,14 +67,21 @@ case "$backend" in
   breeze-tts2)
     base_url="http://${host}:${TTS_BREEZE_PORT:-11441}"
     model="${TTS_BREEZE_MODEL_ALIAS:-breeze-tts2}"
-    voice="ryan"
-    dtype="bfloat16"
+    voice="${TTS_BENCH_CANDIDATE_VOICE:-ryan}"
+    dtype="${TTS_BREEZE_DTYPE:-bfloat16}"
     gpu="${TTS_BREEZE_GPU:-1}"
     runtime_container="ai-voice-breeze-tts2"
     runtime_image="local/tts-breeze-tts2:candidate"
     ;;
+  fish-s2-pro)
+    base_url="http://${host}:${TTS_FISH_PORT:-11442}"
+    model="fish-s2-pro"; voice="${TTS_BENCH_CANDIDATE_VOICE:-ryan}"
+    dtype="auto"; gpu="${TTS_FISH_GPU:-1}"
+    runtime_container="ai-voice-fish-s2-pro"
+    runtime_image="local/tts-fish-s2-pro:candidate"
+    ;;
   *)
-    echo "usage: $0 [qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano] [runs]" >&2
+    echo "usage: $0 [qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2|fish-s2-pro] [runs]" >&2
     exit 2
     ;;
 esac
@@ -141,7 +153,7 @@ if ! curl -fsS --max-time 3 "$base_url/health" > "$run_dir/health.json"; then
 fi
 
 candidate=0
-case "$backend" in indextts25|chatterbox-flash|chatterbox-nano) candidate=1 ;; esac
+case "$backend" in indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2|fish-s2-pro) candidate=1 ;; esac
 if (( candidate )); then
   curl -fsS --max-time 15 "$base_url/v1/runtime" > "$run_dir/runtime-before.json"
   python3 - "$run_dir/runtime-before.json" <<'PY'
@@ -219,6 +231,7 @@ for ((i=1; i<=runs; i++)); do
   if [[ "$curl_exit" -ne 0 || "$http_code" != "200" ]]; then
     echo "ERROR: run $i failed: curl_exit=$curl_exit HTTP=$http_code elapsed=${elapsed}s" >&2
     cat "$err" >&2 || true
+    cat "$out" >&2 || true
     docker logs --tail=240 "$runtime_container" > "$stem.container.log" 2>&1 || true
     exit 1
   fi
@@ -254,11 +267,11 @@ Listen to every run and record:
 - [ ] requested words are recognizable and in the correct order
 - [ ] no repeated/omitted clauses or hallucinated speech
 - [ ] no metallic/high-pitched/numerical corruption
-- [ ] Ryan identity is acceptably preserved (where cloning is supported)
+- [ ] Reference voice identity is acceptably preserved (where cloning is supported)
 - [ ] prosody is acceptable for multi-sentence lecture narration
 - [ ] no obvious degradation between first and repeat generations
 
-Only promote a backend after this gate passes on the GTX 1080 Ti.
+Record listening results separately from mechanical checks.
 EOF
 
 echo "saved=$run_dir"

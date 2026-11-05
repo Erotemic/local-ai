@@ -21,3 +21,7 @@
 __pycache__/
 *.py[cod]
 *.tar.gz
+*.wav
+*.mp3
+
+voice-references

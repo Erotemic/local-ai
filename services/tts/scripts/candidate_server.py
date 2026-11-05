@@ -287,6 +287,19 @@ class Runtime:
                 "use_torch_compile": False,
                 "use_qwen_emo": False,
             })
+        elif BACKEND == "fish-s2-pro":
+            from tools.server.model_manager import ModelManager
+
+            self.fish = ModelManager(
+                mode="tts", device=self.device, half=self.dtype == self.torch.float16,
+                compile=False, llama_checkpoint_path=str(MODEL_DIR),
+                decoder_checkpoint_path=str(MODEL_DIR / "codec.pth"),
+                decoder_config_name="modded_dac_vq",
+            )
+            decoder = self.fish.decoder_model
+            self.sample_rate = (decoder.spec_transform.sample_rate if hasattr(decoder, "spec_transform")
+                                else decoder.sample_rate)
+            self.extra.update({"pipeline": "fish-speech", "reference_conditioned": True})
         elif BACKEND == "breeze-tts2":
             from breeze_infer.runtime import load_runtime, update_generation_config_for_breeze
             # print(f'{help(load_runtime)=}')
@@ -304,8 +317,30 @@ class Runtime:
 
             update_generation_config_for_breeze(self.model)
             self.sample_rate = 24000
+            self.breeze_fast = os.environ.get("TTS_BREEZE_FAST", "0") == "1"
+            if self.breeze_fast:
+                from dataclasses import replace
+                from models.fast_streaming import FastBreezeStreamingRuntime, FastStreamingConfig
+                from models.warmup_profile import load_warmup_profile
+
+                self.breeze_stream = FastBreezeStreamingRuntime(
+                    self.model, self.audio_tokenizer,
+                    FastStreamingConfig(max_new_tokens=750, max_seq_len=2048,
+                                        fast_all=True, repetition_penalty=1.1),
+                    tokenizer=self.tokenizer,
+                )
+                profile = load_warmup_profile(Path("/opt/breeze-tts/configs/fast.json"))
+                # Reference audio can produce prompt lengths absent from the
+                # upstream profile. Capture those buckets on first use.
+                profile = replace(profile, codec_chunk_frames=self.breeze_stream.codec_chunk_frames,
+                                  freeze_after_warmup=False)
+                manifest = self.breeze_stream.warmup_from_profile(profile)
+                print(f"Breeze fast warmup: {manifest['total_elapsed_ms']:.2f} ms", flush=True)
             self.extra.update({
                 "pipeline": "breeze_infer",
+                "breeze_fast": self.breeze_fast,
+                "breeze_fast_graphs_frozen": False if self.breeze_fast else None,
+                "attention_implementation": "eager",
                 "reference_conditioned": REFERENCE_WAV.exists(),
                 "default_speaker": "S0",
             })
@@ -402,6 +437,23 @@ class Runtime:
                     return out_path.read_bytes()
                 finally:
                     out_path.unlink(missing_ok=True)
+            if BACKEND == "fish-s2-pro":
+                from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest
+
+                ref_text = body.get("ref_text") or ref_text_from_file
+                if not ref_text:
+                    raise ValueError(f"voice {voice!r} needs a transcript in {wav_path.stem}.txt or ref_text")
+                request = ServeTTSRequest(
+                    text=text, references=[ServeReferenceAudio(audio=wav_path.read_bytes(), text=str(ref_text))],
+                    seed=seed, format="wav",
+                )
+                for result in self.fish.tts_inference_engine.inference(request):
+                    if result.code == "error":
+                        raise RuntimeError(str(result.error))
+                    if result.code == "final" and result.audio is not None:
+                        rate, samples = result.audio
+                        return wav_bytes_from_float(samples, rate)
+                raise RuntimeError("Fish Speech did not return audio")
             if BACKEND == "breeze-tts2":
                 from breeze_infer.templates import get_template, prepare_inputs, select_template_name
 
@@ -442,6 +494,20 @@ class Runtime:
 
                 target_device = getattr(self, "target_device", self.device)
                 inputs = {k: v.to(target_device) if hasattr(v, "to") else v for k, v in inputs.items()}
+
+                if self.breeze_fast:
+                    from breeze_infer.runtime import set_all_seeds
+
+                    if float(body.get("repetition_penalty", 1.1)) != 1.1:
+                        raise ValueError("Breeze fast mode requires repetition_penalty=1.1")
+                    if seed is not None:
+                        set_all_seeds(seed)
+                    chunks = [chunk.audio for chunk in self.breeze_stream.iter_audio_chunks(
+                        inputs, request_id=request["id"], seed=seed,
+                    )]
+                    if not chunks:
+                        raise RuntimeError("Breeze fast mode returned no audio")
+                    return wav_bytes_from_float(np.concatenate(chunks), self.breeze_stream.sample_rate)
 
                 output_audio = self.model.generate(
                     **inputs,

@@ -318,3 +318,59 @@ curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
     "response_format": "wav"
   }' \
   --output test-crall-lecture.wav
+
+### Fish Audio S2 Pro
+
+S2 Pro is an experimental candidate using the upstream Fish Speech runtime and
+research-licensed model weights. Setup downloads the pinned model and builds its
+image. Set `TTS_FISH_GPU` in `.env` to the host GPU index and optionally set
+`TTS_FISH_PORT` (default 11442).
+
+```bash
+./setup.sh --with-model fish-s2-pro
+./start-candidate.sh fish-s2-pro
+curl -sS http://127.0.0.1:11442/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"fish-s2-pro","input":"This is a voice cloning test. How well can I speak in terms of mathematics here?","voice":"crall-math-dk","response_format":"wav"}' \
+  -o test-fish.wav
+python3 scripts/audio_sanity.py test-fish.wav
+```
+
+The voice needs matching `voice-references/crall-math-dk.wav` and `.txt`
+files. If the audio check fails, inspect `test-fish.wav` for an error response.
+
+To benchmark Breeze and Fish sequentially on an RTX 3090, first provision both
+candidates with `./setup.sh --with-model breeze-tts2 --with-model fish-s2-pro`.
+Then run:
+
+```bash
+./scripts/benchmark-3090.sh 3 0 crall-math-dk
+```
+
+Arguments are the number of requests per model, the physical GPU index, and the
+reference voice. The runner checks the GPU name and requires matching WAV and
+transcript files. It stops both candidate containers before starting, then stops
+each after measuring it. The first request is identified separately from repeat
+requests; startup timing includes the candidate readiness check. The session log
+and each model's audio, request, timing, hardware and runtime metadata are kept
+in a timestamped directory under `{TTS_DATA_ROOT}/benchmarks`. Review the audio
+and the generated `LISTEN_REVIEW.md` alongside the performance numbers.
+
+To measure Breeze's upstream CUDA graph fast path on the 3090, rebuild the
+Breeze image after updating the adapter, then run:
+
+```bash
+./compose.sh build breeze-tts2
+./scripts/benchmark-breeze-fast.sh 3 0 crall-math-dk
+```
+
+This is an opt-in alternative to the eager benchmark. It stops the Breeze and
+Fish containers, starts Breeze with `TTS_BREEZE_FAST=1`, warms the upstream fast
+profile before readiness, measures three requests, and stops Breeze afterward.
+The startup time includes graph warmup; request timings do not. Artifacts are
+retained in a separate timestamped `breeze-fast-3090` benchmark directory.
+The runtime metadata records the mode. Prompt sizes outside the upstream warmup
+profile are captured on first use, so the first request can include additional
+graph capture time. Listen to the output as well as comparing
+RTF and peak GPU memory with the eager baseline. Set
+`TTS_BREEZE_FAST_START_TIMEOUT` if warmup needs more than 1800 seconds.

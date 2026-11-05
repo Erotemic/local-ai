@@ -23,6 +23,7 @@ case "$backend" in
   indextts25) port="${TTS_INDEXTTS25_PORT:-11438}"; container="ai-voice-indextts25" ;;
   chatterbox-flash) port="${TTS_CHATTERBOX_FLASH_PORT:-11439}"; container="ai-voice-chatterbox-flash" ;;
   chatterbox-nano) port="${TTS_CHATTERBOX_NANO_PORT:-11440}"; container="ai-voice-chatterbox-nano" ;;
+  fish-s2-pro) port="${TTS_FISH_PORT:-11442}"; container="ai-voice-fish-s2-pro" ;;
   breeze-tts2) port="${TTS_BREEZE_PORT:-11441}"; container="ai-voice-breeze-tts2" ;;
   *) echo "ERROR: invalid TTS_ACTIVE_BACKEND=$backend" >&2; exit 2 ;;
 esac
@@ -53,7 +54,7 @@ if curl -fsS --max-time 2 "$local_url/health" >/dev/null 2>&1; then
   echo "models:"
   curl -fsS --max-time 5 "$local_url/v1/models" 2>/dev/null || true
   echo
-  if [[ "$backend" == "indextts25" || "$backend" == chatterbox-* || "$backend" == "breeze-tts2" ]]; then
+  if [[ "$backend" == "indextts25" || "$backend" == chatterbox-* || "$backend" == "breeze-tts2" || "$backend" == "fish-s2-pro" ]]; then
     echo "runtime:"
     curl -fsS --max-time 10 "$local_url/v1/runtime" 2>/dev/null || true
     echo

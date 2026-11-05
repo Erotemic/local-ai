@@ -23,7 +23,7 @@ for key in "${!inherited_overrides[@]}"; do export "$key=${inherited_overrides[$
 
 backend="${TTS_ACTIVE_BACKEND:-qwentts}"
 case "$backend" in
-  qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2) ;;
+  qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2|fish-s2-pro) ;;
   *)
     echo "ERROR: unsupported TTS_ACTIVE_BACKEND=$backend" >&2
     exit 2
@@ -33,7 +33,7 @@ esac
 # Add breeze-tts2 to the cleanup list so it is shut down when switching models:
 "$SERVICE_DIR/compose.sh" stop \
   qwentts-gateway qwentts kokoro-gpu kokoro-cpu \
-  indextts25 chatterbox-flash chatterbox-nano breeze-tts2 >/dev/null 2>&1 || true
+  indextts25 chatterbox-flash chatterbox-nano breeze-tts2 fish-s2-pro >/dev/null 2>&1 || true
 
 echo "Starting active TTS backend: $backend"
 case "$backend" in
@@ -43,5 +43,6 @@ case "$backend" in
   indextts25) exec "$SERVICE_DIR/start-indextts25.sh" ;;
   chatterbox-flash) exec "$SERVICE_DIR/start-chatterbox-flash.sh" ;;
   chatterbox-nano) exec "$SERVICE_DIR/start-chatterbox-nano.sh" ;;
+  fish-s2-pro) exec "$SERVICE_DIR/start-candidate.sh" fish-s2-pro ;;
   breeze-tts2) exec "$SERVICE_DIR/start-candidate.sh" breeze-tts2 ;;
 esac

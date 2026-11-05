@@ -74,6 +74,9 @@ required = [
   "TTS_BREEZE_PORT",
   "TTS_BREEZE_GPU",
   "TTS_BREEZE_MODEL_ALIAS",
+  "TTS_FISH_PORT",
+  "TTS_FISH_GPU",
+  "TTS_FISH_START_TIMEOUT",
 ]
 
 [defaults]
@@ -214,3 +217,16 @@ check_files = [
   "model-00001-of-00002.safetensors",
   "model-00002-of-00002.safetensors",
 ]
+
+[[models]]
+name = "fish-s2-pro"
+label = "Fish Audio S2 Pro"
+required = false
+source = "huggingface"
+source_label = "hf://fishaudio/s2-pro@1de9996b6be38b745688de084d87a5633f714e4e"
+repository = "fishaudio/s2-pro"
+revision = "1de9996b6be38b745688de084d87a5633f714e4e"
+destination = "{HF_REPOS_ROOT}/fishaudio/s2-pro"
+container_path = "/models"
+compose_build_target = "fish-s2-pro"
+check_files = ["config.json", "codec.pth", "tokenizer.json", "model.safetensors.index.json", "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"]
