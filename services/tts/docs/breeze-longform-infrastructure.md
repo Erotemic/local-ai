@@ -27,14 +27,24 @@ Then, with a Breeze server already running and an authorized `foobar` voice inst
 
 ```bash
 python3 services/tts/scripts/longform_benchmark.py run \
-    --url http://127.0.0.1:11441 \
-    --voice foobar \
+    --url http://127.0.0.1:8821 \
+    --voice "${TTS_BENCH_VOICE:?Set your local benchmark voice first}" \
     --input services/tts/fixtures/longform-math.txt \
     --output-dir "$HOME/.cache/local-ai/tts-longform" \
     --max-segments 3
 ```
 
-`foobar` is a **distributable example name**, not an included voice. Supply the actual server voice at runtime without putting its identifier, WAV or transcript in checked-in files. For a real lecture, point `--input` at a private extracted spoken transcript outside this server repository. A larger input provides more adjacent passages for meaningful comparisons.
+`foobar` is a **distributable example name**, not an included voice. Set `TTS_BENCH_VOICE` privately at runtime; do not put personal voice identifiers, WAVs, transcripts, instructions, or experiment output in Git. An unset or empty variable now aborts before the benchmark contacts the server. The server base URL is shown for a local deployment exposing host port `8821`; use the actual port reported by `docker ps` if it differs. For a real lecture, point `--input` at a private extracted spoken transcript outside this server repository. A larger input provides more adjacent passages for meaningful comparisons.
+
+The first checks after a failed benchmark should be:
+
+```bash
+if [ -n "${TTS_BENCH_VOICE:-}" ]; then echo 'Voice variable set'; else echo 'Voice variable EMPTY'; fi
+python3 services/tts/scripts/longform_benchmark.py report \
+  --run-dir "$HOME/.cache/local-ai/tts-longform/<your-run-directory>"
+```
+
+`report` also understands retained manifests from the initial version of this tool. It groups errors by HTTP status or WAV-validation type without printing stored voice identifiers, input prose, or server paths. The full HTTP error body is preserved in each **private** segment's `error.json` for local debugging. If the server returns a request-level HTTP 400/401/403/404/422, the benchmark stops instead of repeating the same failure for every segment. A run with any failed requests returns a nonzero CLI exit status. Neither endpoint discovery nor voice validation proves that an installed reference has a matching transcript, so a request can still fail and provide that specific detail in the private error record.
 
 The four initial variants are `short12` (12 words, CFG 2.0, no instruction by default), `plain40` (40 words, CFG 1.0, no instruction), `directed40` (40 words, CFG 2.0, concise generic direction), and `paragraph80` (80 words, CFG 1.0). Each uses sentence boundaries where possible and the same seed (42 by default). Long sentences still require word-boundary splitting. These numbers are **trial settings**, not validated optimal generation budgets.
 

@@ -247,3 +247,101 @@ class LongformTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RejectHandler(StubHandler):
+    requests = []
+
+    def do_GET(self):
+        if self.path == '/v1/models':
+            body = {'data': [{'id': 'breeze-tts2', 'speakers': ['foobar', 'ryan']}]}
+            self.reply(json.dumps(body).encode(), 'application/json')
+        else:
+            super().do_GET()
+
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        self.requests.append(request)
+        response = json.dumps({'error': "voice 'foobar' has no matching transcript"}).encode()
+        self.send_response(400)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+
+class FailureDiagnosticsTests(unittest.TestCase):
+    def test_empty_voice_is_rejected_before_network_or_artifacts(self):
+        for bad in ('', '  ', '\t'):
+            with self.subTest(bad=repr(bad)):
+                with self.assertRaisesRegex(ValueError, 'voice'):
+                    bench.validate_voice(bad, {})
+        with self.assertRaisesRegex(ValueError, 'not listed'):
+            bench.validate_voice('unknown', {'speakers': ['foobar']})
+        bench.validate_voice('foobar', {'speakers': ['foobar']})
+
+    def test_http_configuration_error_stops_run_and_redacts_report(self):
+        import contextlib
+        RejectHandler.requests = []
+        server = ThreadingHTTPServer(('127.0.0.1', 0), RejectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                args = argparse.Namespace(
+                    url=f'http://127.0.0.1:{server.server_port}', voice='foobar',
+                    model=None, input=bench.DEFAULT_EXCERPT, output_dir=root / 'runs',
+                    variant=None, seed=42, max_segments=3, timeout=10, join_pause=0.15)
+                captured = io.StringIO()
+                with contextlib.redirect_stdout(captured):
+                    path = bench.run(args)
+                self.assertEqual(len(RejectHandler.requests), 1)
+                summary = bench.report(path)
+                self.assertEqual(summary['failures'], 1)
+                self.assertIn('HTTP 400', captured.getvalue())
+                self.assertNotIn('foobar', captured.getvalue())
+                self.assertNotIn('foobar', json.dumps(summary))
+                manifest = json.loads((path / 'manifest.json').read_text())
+                self.assertEqual(manifest['status'], 'aborted')
+                self.assertEqual(manifest['segments'], 1)
+                # Old retained runs should be reportable without leaking details.
+                rows = json.loads((path / 'results.json').read_text())
+                rows[0].pop('error_category')
+                bench.atomic_json(path / 'results.json', rows)
+                summary = bench.report(path)
+                self.assertEqual(summary['failures'], 1)
+                self.assertNotIn('foobar', json.dumps(summary))
+                self.assertIn('HTTP 400', next(iter(summary['categories'])))
+                self.assertEqual(len(list(path.glob('**/audio.wav'))), 0)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_cli_reports_failure_exit_status_and_report(self):
+        import contextlib
+        RejectHandler.requests = []
+        server = ThreadingHTTPServer(('127.0.0.1', 0), RejectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                args = ['run', '--url', f'http://127.0.0.1:{server.server_port}',
+                        '--voice', 'foobar', '--output-dir', str(root / 'runs'),
+                        '--max-segments', '3']
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    status = bench.main(args)
+                self.assertEqual(status, 1)
+                self.assertIn('synthesis failures', stderr.getvalue())
+                run_dir = next((root / 'runs').iterdir())
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    self.assertEqual(bench.main(['report', '--run-dir', str(run_dir)]), 0)
+                self.assertEqual(json.loads(stdout.getvalue())['failures'], 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)

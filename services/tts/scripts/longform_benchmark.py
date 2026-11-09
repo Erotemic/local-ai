@@ -28,7 +28,7 @@ import wave
 HERE = Path(__file__).resolve()
 REPO = HERE.parents[3]
 DEFAULT_EXCERPT = HERE.parents[1] / 'fixtures' / 'longform-math.txt'
-VERSION = 1
+VERSION = 2
 MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 # Use fixed complete passages for paired configurations. A long sentence is
 # split only when it cannot fit the selected word budget.
@@ -227,13 +227,54 @@ def _request(url: str, *, payload: dict | None = None, timeout: float = 20) -> t
             return content, {'status': response.status, 'content_type': response.headers.get('Content-Type', '')}
     except urllib.error.HTTPError as exc:
         detail = exc.read(512).decode('utf8', 'replace')
-        raise RuntimeError(f'HTTP {exc.code}: {detail}') from exc
+        raise RequestFailure(exc.code, detail) from exc
 
 
-def discover(url: str) -> tuple[str, dict]:
+class RequestFailure(RuntimeError):
+    """HTTP failure with the response kept privately, not printed to stdout."""
+    def __init__(self, status: int, detail: str):
+        self.status = status
+        self.detail = detail
+        super().__init__(f'HTTP {status}: {detail}')
+
+
+def failure_label(exc: Exception) -> str:
+    """Short diagnostic without private speaker names or server paths."""
+    if isinstance(exc, RequestFailure):
+        reason = ('invalid request, voice, or reference transcript' if exc.status in (400, 422)
+                  else 'authentication or permission rejected' if exc.status in (401, 403)
+                  else 'speech endpoint not found' if exc.status == 404
+                  else 'speech server synthesis failure' if exc.status >= 500
+                  else 'speech request rejected')
+        return f'HTTP {exc.status}: {reason}'
+    if isinstance(exc, wave.Error):
+        return 'invalid WAV returned by server'
+    if isinstance(exc, urllib.error.URLError):
+        return 'speech endpoint connection failed'
+    if isinstance(exc, ValueError):
+        return 'invalid response or audio measurement'
+    return 'speech generation failed'
+
+
+def validate_voice(voice: str, model_info: dict) -> None:
+    """Reject blank or unlisted voices before creating an artifact directory."""
+    if not isinstance(voice, str) or not voice.strip():
+        raise ValueError('--voice is empty. Set TTS_BENCH_VOICE locally or supply --voice.')
+    if voice != voice.strip() or any(ord(ch) < 32 for ch in voice):
+        raise ValueError('--voice contains whitespace or control characters')
+    available = model_info.get('speakers')
+    if isinstance(available, list) and available:
+        if voice.casefold() not in {str(name).casefold() for name in available}:
+            raise ValueError('--voice is not listed in /v1/models speakers; check its local value')
+
+
+def discover(url: str, *, voice: str | None = None) -> tuple[str, dict]:
     try:
         raw, _ = _request(url + '/v1/models')
-        model = json.loads(raw)['data'][0]['id']
+        model_info = json.loads(raw)['data'][0]
+        model = model_info['id']
+        if voice is not None:
+            validate_voice(voice, model_info)
     except (KeyError, IndexError, ValueError, urllib.error.URLError) as exc:
         raise RuntimeError(f'cannot discover model from {url}: {exc}') from exc
     raw, _ = _request(url + '/v1/runtime')
@@ -273,8 +314,11 @@ def run(args: argparse.Namespace) -> Path:
     limit = args.max_segments
     if limit < 1:
         raise ValueError('--max-segments must be positive')
+    # Quoted, unset shell variables are otherwise parsed as an empty voice.
+    # Catch this before the network probe or the creation of any run artifacts.
+    validate_voice(args.voice, {})
     base = args.url.rstrip('/')
-    model, runtime = discover(base)
+    model, runtime = discover(base, voice=args.voice)
     model = args.model or model
     ref_wav = getattr(args, 'reference_wav', None)
     ref_text = getattr(args, 'reference_transcript', None)
@@ -300,6 +344,7 @@ def run(args: argparse.Namespace) -> Path:
     atomic_json(out / 'manifest.json', manifest)
     rows = []
     joins = {}
+    abort_reason = None
     for name in chosen:
         variant = VARIANTS[name]
         pieces = passages(text, variant['max_words'])[:limit]
@@ -335,11 +380,22 @@ def run(args: argparse.Namespace) -> Path:
                 row.update(status='needs_listening_review', **measurements)
             except (OSError, RuntimeError, ValueError, wave.Error, urllib.error.URLError) as exc:
                 row['error'] = f'{type(exc).__name__}: {exc}'[:600]
-                atomic_json(folder / 'error.json', dict(error=row['error']))
+                row['error_category'] = failure_label(exc)
+                if isinstance(exc, RequestFailure):
+                    row['http_status'] = exc.status
+                    # Fixed invalid requests are not useful to retry for each
+                    # segment. Stop after retaining the first response.
+                    if exc.status in (400, 401, 403, 404, 422):
+                        abort_reason = row['error_category']
+                atomic_json(folder / 'error.json', dict(error=row['error'],
+                                                        category=row['error_category']))
             rows.append(row)
             variant_rows.append(row)
             atomic_json(out / 'results.json', rows)
-            print(f'{name} {i+1}/{len(pieces)} {row["status"]}', flush=True)
+            diagnostic = (' (' + row['error_category'] + ')' if 'error_category' in row else '')
+            print(f'{name} {i+1}/{len(pieces)} {row["status"]}{diagnostic}', flush=True)
+            if abort_reason:
+                break
         if variant_rows and all(row['status'] == 'needs_listening_review' for row in variant_rows):
             preview = out / name / 'joined.wav'
             files = [out / name / f'{i:03d}' / 'audio.wav' for i in range(len(variant_rows))]
@@ -354,7 +410,11 @@ def run(args: argparse.Namespace) -> Path:
         else:
             joins[name] = dict(status='skipped_due_to_failed_segment')
         atomic_json(out / 'joins.json', joins)
-    manifest['status'] = 'recorded'
+        if abort_reason:
+            break
+    manifest['status'] = 'aborted' if abort_reason else 'recorded'
+    if abort_reason:
+        manifest['abort_reason'] = abort_reason
     manifest['completed_utc'] = datetime.now(timezone.utc).isoformat()
     manifest['segments'] = len(rows)
     manifest['join_pause_seconds'] = args.join_pause
@@ -371,12 +431,48 @@ def run(args: argparse.Namespace) -> Path:
     return out
 
 
+def _retained_error_category(row: dict) -> str:
+    if row.get('error_category'):
+        return row['error_category']
+    # Older retained runs recorded the raw exception but no category. Parse
+    # only status/type; never echo voice names, transcript text, or file paths.
+    message = str(row.get('error', ''))
+    status = re.search(r'\bHTTP (\d{3})\b', message)
+    if status:
+        return failure_label(RequestFailure(int(status.group(1)), ''))
+    if 'wave.Error' in message or 'not a WAV' in message:
+        return 'invalid WAV returned by server'
+    if 'URLError' in message or 'Connection refused' in message:
+        return 'speech endpoint connection failed'
+    if 'ValueError' in message:
+        return 'invalid response or audio measurement'
+    return 'error; inspect private error.json'
+
+
+def report(run_directory: Path) -> dict:
+    """Report existing error categories without showing private voice names."""
+    directory = Path(run_directory).expanduser().resolve()
+    manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf8'))
+    rows = json.loads((directory / 'results.json').read_text(encoding='utf8'))
+    counts = {}
+    for row in rows:
+        if row['status'] != 'error':
+            continue
+        category = _retained_error_category(row)
+        counts[category] = counts.get(category, 0) + 1
+    return dict(status=manifest.get('status'), segments=len(rows),
+                failures=sum(counts.values()), categories=counts,
+                hint='Inspect the run directory error.json privately for full server details')
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     plan = sub.add_parser('plan', help='print deterministic passage sizes without contacting a server')
     plan.add_argument('--input', type=Path, default=DEFAULT_EXCERPT)
     plan.add_argument('--variant', action='append', choices=sorted(VARIANTS))
+    summary = sub.add_parser('report', help='summarize a previous run without speaker identifiers')
+    summary.add_argument('--run-dir', required=True, type=Path)
     runp = sub.add_parser('run', help='retain a benchmark run against an existing Breeze endpoint')
     runp.add_argument('--url', required=True, help='server base URL, without /v1')
     runp.add_argument('--voice', required=True, help='name of an authorized voice installed on the server')
@@ -408,8 +504,16 @@ def main(argv: list[str] | None = None) -> int:
                 for key in (args.variant or list(VARIANTS))}
         print(json.dumps(rows, indent=2))
         return 0
+    if args.command == 'report':
+        print(json.dumps(report(args.run_dir), indent=2))
+        return 0
     output = run(args)
     print(f'Retained benchmark: {output}')
+    summary = report(output)
+    if summary['failures']:
+        print('ERROR: benchmark had synthesis failures; use the report command or '
+              'inspect private error.json files for details', file=sys.stderr)
+        return 1
     return 0
 
 
