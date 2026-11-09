@@ -332,10 +332,10 @@ For Breeze:
 ./setup.sh --with-model breeze-tts2
 ./start-candidate.sh breeze-tts2
 
-curl -s http://127.0.0.1:8812/health
-curl -s http://127.0.0.1:8812/v1/runtime
+curl -s http://127.0.0.1:8821/health
+curl -s http://127.0.0.1:8821/v1/runtime
 
-curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
+curl -sS -X POST http://127.0.0.1:8821/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
     "model": "breeze-tts2",
@@ -345,9 +345,9 @@ curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
   }' \
   --output test-breeze.wav
 
-curl -s http://127.0.0.1:8812/v1/audio/voices | python3 -m json.tool
+curl -s http://127.0.0.1:8821/v1/audio/voices | python3 -m json.tool
 
-curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
+curl -sS -X POST http://127.0.0.1:8821/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
     "model": "breeze-tts2",
@@ -358,7 +358,7 @@ curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
   --output test-crall.wav && python3 scripts/audio_sanity.py test-crall.wav
 
 
-curl -sS -X POST http://127.0.0.1:8812/v1/audio/speech \
+curl -sS -X POST http://127.0.0.1:8821/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
     "model": "breeze-tts2",
