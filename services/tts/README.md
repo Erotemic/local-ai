@@ -20,6 +20,34 @@ selection directly.
 For opt-in Breeze long-form benchmarks, reference-pair diagnostics, and offline
 regression tests, see [the long-form infrastructure guide](docs/breeze-longform-infrastructure.md).
 The tools do not modify the production TTS endpoint or its lifecycle scripts.
+
+
+### Breeze paragraph80 speech requests
+
+The Breeze adapter supports opt-in paragraph-aware synthesis on the existing
+`POST /v1/audio/speech` endpoint: pass `"long_form": true`, `"cfg_scale": 1.0`,
+and omit speaking instructions. It groups complete sentences toward 80 words
+per generation (110-word hard maximum), preserves paragraph boundaries,
+retries overlong or implausibly brief passages at smaller sizes, and joins PCM
+before the usual WAV/MP3 response conversion. It returns the response headers
+`X-Local-AI-Speech-Policy: paragraph80-v1` and
+`X-Local-AI-Speech-Timings` with passage offsets; `/v1/runtime` advertises the
+policy. Single-request callers are unchanged unless they opt in.
+
+For already-provisioned Breeze images, the new Python helper must be added to
+the container image. After applying the source overlay, run:
+
+```bash
+cd ~/code/local-ai/services/tts
+./compose.sh build breeze-tts2
+TTS_ACTIVE_BACKEND=breeze-tts2 ./start.sh --keep-running
+curl -fsS http://127.0.0.1:8821/v1/runtime | python3 -m json.tool
+```
+
+The example port is the currently published local port; check `docker ps` if
+it changes. Building/restarting the Breeze container briefly interrupts
+in-flight speech requests. Keep private voice identifiers and generated audio
+outside Git.
 Keep generated audio, reference recordings, and experiment data in private,
 untracked storage.
 
@@ -441,3 +469,8 @@ model and default voice where available. Use `./test.sh --voice crall-math-dk
 --output test-crall.wav` to select a voice and retain the audio for listening.
 `--model`, `--text`, and `--timeout` can also override the defaults. The test
 checks the configured active backend and honors `TTS_*` environment overrides.
+
+
+Long-form speech requests can use the asynchronous `/v1/audio/jobs` API to
+observe completed paragraph counts, prioritize interactive playback, and
+cancel between passages. See `docs/breeze-longform-infrastructure.md`.

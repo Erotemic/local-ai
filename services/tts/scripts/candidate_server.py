@@ -362,6 +362,11 @@ class Runtime:
             "loaded_at_unix": self.loaded_at,
             **self.extra,
         }
+        if BACKEND == 'breeze-tts2':
+            from longform_speech import POLICY, TARGET_WORDS, HARD_MAX_WORDS
+            result['long_form'] = {'policy': POLICY, 'target_words': TARGET_WORDS,
+                                   'hard_max_words': HARD_MAX_WORDS,
+                                   'cfg_scale': 1.0, 'instruction': False}
         result.update(cuda_metadata(self.torch))
         return result
 
@@ -529,6 +534,7 @@ class Runtime:
 
 
 RUNTIME: Runtime | None = None
+JOB_QUEUE = None  # Initialized after the inference runtime is loaded.
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -537,10 +543,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"[http] {self.address_string()} {fmt % args}", flush=True)
 
-    def send_payload(self, status: int, payload: bytes, content_type: str) -> None:
+    def send_payload(self, status: int, payload: bytes, content_type: str,
+                     extra_headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(payload)
 
@@ -556,21 +565,97 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path in {"/v1/audio/voices", "/v1/voices"}:
             self.send_json(HTTPStatus.OK, voice_discovery_payload())
         elif self.path == "/v1/runtime":
-            self.send_json(HTTPStatus.OK, RUNTIME.metadata())
+            info = RUNTIME.metadata()
+            if BACKEND == 'breeze-tts2':
+                info['long_form_jobs'] = {'path': '/v1/audio/jobs',
+                                         'cancellation': 'between-passages',
+                                         'workers': 1}
+            self.send_json(HTTPStatus.OK, info)
+        elif self.path.startswith('/v1/audio/jobs/') and JOB_QUEUE is not None:
+            from longform_speech import POLICY, timing_header
+            suffix = self.path[len('/v1/audio/jobs/'):].split('/')
+            if len(suffix) not in (1, 2) or (len(suffix) == 2 and suffix[1] != 'audio'):
+                self.send_json(HTTPStatus.NOT_FOUND, {'error': 'not found'})
+                return
+            job_id = suffix[0]
+            if len(suffix) == 1:
+                status = JOB_QUEUE.status(job_id)
+                self.send_json(HTTPStatus.OK, status) if status else self.send_json(
+                    HTTPStatus.NOT_FOUND, {'error': 'unknown or expired speech job'})
+            else:
+                audio = JOB_QUEUE.audio(job_id)
+                if audio is not None:
+                    pcm, timing = audio
+                    self.send_payload(HTTPStatus.OK, pcm, 'audio/wav',
+                        {'X-Local-AI-Speech-Policy': POLICY,
+                         'X-Local-AI-Speech-Timings': timing_header(timing)})
+                else:
+                    state = JOB_QUEUE.status(job_id)
+                    self.send_json(HTTPStatus.CONFLICT if state else HTTPStatus.NOT_FOUND,
+                                   {'error': 'job audio is not ready'})
         else:
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not self.path.startswith('/v1/audio/jobs/') or JOB_QUEUE is None:
+            self.send_json(HTTPStatus.NOT_FOUND, {'error': 'not found'})
+            return
+        suffix = self.path[len('/v1/audio/jobs/'):]
+        if not suffix or '/' in suffix:
+            self.send_json(HTTPStatus.NOT_FOUND, {'error': 'not found'})
+            return
+        result = JOB_QUEUE.cancel(suffix)
+        self.send_json(HTTPStatus.OK, result) if result else self.send_json(
+            HTTPStatus.NOT_FOUND, {'error': 'unknown or expired speech job'})
+
     def do_POST(self) -> None:  # noqa: N802
         assert RUNTIME is not None
+        if self.path == '/v1/audio/jobs':
+            if JOB_QUEUE is None:
+                self.send_json(HTTPStatus.NOT_IMPLEMENTED, {'error': 'speech jobs are not available'})
+                return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if length <= 0 or length > 32768:
+                    raise ValueError('speech job request must be 1–32768 bytes')
+                body = json.loads(self.rfile.read(length))
+                priority = body.pop('job_priority', 10)
+                result = JOB_QUEUE.submit(body, priority=priority)
+                self.send_json(HTTPStatus.ACCEPTED, result)
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                self.send_json(HTTPStatus.BAD_REQUEST, {'error': str(exc)})
+            except OverflowError as exc:
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {'error': str(exc)})
+            return
         if self.path != "/v1/audio/speech":
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length) or b"{}")
-            wav_data = RUNTIME.synthesize(body)
+            use_long_form = body.get('long_form', False)
+            if not isinstance(use_long_form, bool):
+                raise ValueError('long_form must be a boolean')
+            headers = {}
+            if use_long_form:
+                if BACKEND != 'breeze-tts2':
+                    raise ValueError('long_form is supported only for breeze-tts2')
+                if any(body.get(key) for key in ('instruction', 'direction', 'voice_direction')):
+                    raise ValueError('paragraph80 long_form does not accept speaking instructions')
+                if float(body.get('cfg_scale', 1)) != 1.0:
+                    raise ValueError('paragraph80 long_form requires cfg_scale=1.0')
+                from longform_speech import POLICY, synthesize_longform, timing_header
+                result = synthesize_longform(
+                    body.get('input', ''),
+                    lambda piece: RUNTIME.synthesize({**body, 'input': piece, 'cfg_scale': 1.0}),
+                )
+                wav_data = result.audio
+                headers = {'X-Local-AI-Speech-Policy': POLICY,
+                           'X-Local-AI-Speech-Timings': timing_header(result.timings)}
+            else:
+                wav_data = RUNTIME.synthesize(body)
             encoded, content_type = convert_wav(wav_data, str(body.get("response_format", "wav")))
-            self.send_payload(HTTPStatus.OK, encoded, content_type)
+            self.send_payload(HTTPStatus.OK, encoded, content_type, headers)
         except (ValueError, json.JSONDecodeError) as ex:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(ex)})
         except Exception as ex:  # keep experiment failures observable to client + logs
@@ -645,7 +730,7 @@ def provision_indextts25() -> None:
 
 
 def main() -> None:
-    global RUNTIME
+    global RUNTIME, JOB_QUEUE
     parser = argparse.ArgumentParser()
     parser.add_argument("--provision-only", action="store_true")
     args = parser.parse_args()
@@ -659,6 +744,10 @@ def main() -> None:
     if not REFERENCE_WAV.is_file():
         raise SystemExit(f"reference WAV is missing: {REFERENCE_WAV}")
     RUNTIME = Runtime()
+    if BACKEND == 'breeze-tts2':
+        from speech_jobs import SpeechJobQueue
+        JOB_QUEUE = SpeechJobQueue(lambda piece, body: RUNTIME.synthesize(
+            {**body, 'input': piece, 'cfg_scale': 1.0}), workers=1)
     print(json.dumps(RUNTIME.metadata(), sort_keys=True), flush=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"serving {BACKEND} as {MODEL_ALIAS} on {HOST}:{PORT}", flush=True)
