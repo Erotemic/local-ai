@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import threading
+from types import SimpleNamespace
 import urllib.request
 from pathlib import Path
 
@@ -40,7 +41,7 @@ def fetch_json(url: str) -> dict:
 def main() -> None:
     alias = "chatterbox-flash"
     module = load_candidate_server(alias)
-    module.RUNTIME = object()  # Discovery endpoints do not touch the model runtime.
+    module.RUNTIME = SimpleNamespace(loaded_at=0)  # No model is loaded for discovery tests.
 
     server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
