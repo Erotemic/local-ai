@@ -130,7 +130,9 @@ clients to display queue progress and cancel generation. The existing
   smaller runs first). Responds with HTTP 202 and a random job `id`.
 - `GET /v1/audio/jobs/{id}`: returns `queued`, `rendering`, `canceling`,
   `cancelled`, `ready`, or `error`, with completed/total words and passage counts,
-  elapsed time, and queued position when applicable.
+  elapsed time, the currently synthesizing passage index and its word count,
+  and queued position when applicable. A single passage may occupy the GPU for
+  the entire request, so `completed_passages=0` does not imply inactivity.
 - `GET /v1/audio/jobs/{id}/audio`: available on `ready`. Returns the joined
   WAV and the same paragraph80 timing and policy headers as the blocking API.
 - `DELETE /v1/audio/jobs/{id}`: cancels queued jobs immediately and requests
