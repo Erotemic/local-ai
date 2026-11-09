@@ -34,7 +34,7 @@ MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 # split only when it cannot fit the selected word budget.
 ABBREVIATIONS = {'dr.', 'mr.', 'mrs.', 'prof.', 'fig.', 'eq.', 'e.g.', 'i.e.', 'etc.'}
 VARIANTS = {
-    'short12': dict(max_words=12, cfg_scale=2.0, instruction=None),
+    'short12': dict(max_words=12, cfg_scale=1.0, instruction=None),
     'plain40': dict(max_words=40, cfg_scale=1.0, instruction=None),
     'directed40': dict(max_words=40, cfg_scale=2.0,
                        instruction='Speak in a natural, measured mathematical lecture style.'),
@@ -241,6 +241,8 @@ class RequestFailure(RuntimeError):
 def failure_label(exc: Exception) -> str:
     """Short diagnostic without private speaker names or server paths."""
     if isinstance(exc, RequestFailure):
+        if exc.status in (400, 422) and 'does not define a negative prompt' in exc.detail.lower():
+            return f'HTTP {exc.status}: CFG > 1 requires an instruction-compatible Breeze template'
         reason = ('invalid request, voice, or reference transcript' if exc.status in (400, 422)
                   else 'authentication or permission rejected' if exc.status in (401, 403)
                   else 'speech endpoint not found' if exc.status == 404
@@ -254,6 +256,27 @@ def failure_label(exc: Exception) -> str:
     if isinstance(exc, ValueError):
         return 'invalid response or audio measurement'
     return 'speech generation failed'
+
+
+def variant_instruction(name: str, baseline_instruction: str | None = None) -> str | None:
+    """Return the effective instruction for a benchmark trial."""
+    if baseline_instruction and name in ('short12', 'directed40'):
+        return baseline_instruction
+    return VARIANTS[name]['instruction']
+
+
+def validate_breeze_cfg(cfg_scale: float, instruction: str | None) -> None:
+    """Reject unsupported reference-clone CFG combinations before inference.
+
+    The ref_clone_tata template has no negative prompt. Supplying a guidance
+    scale greater than one without an instruction selects that template and
+    Breeze rejects the request. An instruction selects a different template.
+    """
+    if not math.isfinite(cfg_scale) or cfg_scale <= 0:
+        raise ValueError('Breeze CFG scale must be positive and finite')
+    if cfg_scale > 1.0 and not instruction:
+        raise ValueError('Breeze CFG > 1 requires a nonempty instruction; '
+                         'use CFG 1 for undirected reference cloning')
 
 
 def validate_voice(voice: str, model_info: dict) -> None:
@@ -332,6 +355,9 @@ def run(args: argparse.Namespace) -> Path:
     baseline_instruction = prompt_file.read_text(encoding='utf8').strip() if prompt_file else None
     if prompt_file and not baseline_instruction:
         raise ValueError('baseline instruction file is empty')
+    for name in chosen:
+        validate_breeze_cfg(VARIANTS[name]['cfg_scale'],
+                            variant_instruction(name, baseline_instruction))
     out = make_run_dir(verify_output_dir(args.output_dir))
     (out / 'input.txt').write_text(text, encoding='utf8')
     manifest = dict(schema=VERSION, created_utc=datetime.now(timezone.utc).isoformat(),
@@ -355,8 +381,7 @@ def run(args: argparse.Namespace) -> Path:
             payload = dict(model=model, voice=args.voice, input=piece,
                            response_format='wav', cfg_scale=variant['cfg_scale'],
                            seed=args.seed)
-            instruction = (baseline_instruction if name in ('short12', 'directed40') and baseline_instruction
-                           else variant['instruction'])
+            instruction = variant_instruction(name, baseline_instruction)
             if instruction is not None:
                 payload['instruction'] = instruction
             atomic_json(folder / 'request.json', payload)
@@ -439,7 +464,7 @@ def _retained_error_category(row: dict) -> str:
     message = str(row.get('error', ''))
     status = re.search(r'\bHTTP (\d{3})\b', message)
     if status:
-        return failure_label(RequestFailure(int(status.group(1)), ''))
+        return failure_label(RequestFailure(int(status.group(1)), message))
     if 'wave.Error' in message or 'not a WAV' in message:
         return 'invalid WAV returned by server'
     if 'URLError' in message or 'Connection refused' in message:

@@ -68,6 +68,12 @@ class StubHandler(BaseHTTPRequestHandler):
             return
         req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         self.requests.append(req)
+        if req.get('cfg_scale', 1.0) > 1 and not req.get('instruction'):
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"error":"clone template does not define a negative prompt"}')
+            return
         self.reply(b'not a WAV' if self.clipped else fake_wav(), 'audio/wav')
 
 
@@ -83,6 +89,33 @@ class LongformTests(unittest.TestCase):
         self.assertRaises(ValueError, bench.sentences, '')
         self.assertEqual(bench.passages('One complete paragraph.\n\nAnother complete paragraph.', 40),
                          ['One complete paragraph.', 'Another complete paragraph.'])
+
+    def test_variant_cfg_matches_breeze_template_requirements(self):
+        self.assertEqual(bench.VARIANTS['short12']['cfg_scale'], 1.0)
+        self.assertEqual(bench.VARIANTS['plain40']['cfg_scale'], 1.0)
+        self.assertEqual(bench.VARIANTS['paragraph80']['cfg_scale'], 1.0)
+        self.assertEqual(bench.VARIANTS['directed40']['cfg_scale'], 2.0)
+        self.assertIsNone(bench.variant_instruction('short12'))
+        self.assertIsNotNone(bench.variant_instruction('directed40'))
+        for name, spec in bench.VARIANTS.items():
+            bench.validate_breeze_cfg(spec['cfg_scale'], bench.variant_instruction(name))
+        with self.assertRaisesRegex(ValueError, 'requires a nonempty instruction'):
+            bench.validate_breeze_cfg(2.0, None)
+        with self.assertRaisesRegex(ValueError, 'requires a nonempty instruction'):
+            bench.validate_breeze_cfg(2.0, '')
+        with self.assertRaisesRegex(ValueError, 'positive and finite'):
+            bench.validate_breeze_cfg(float('nan'), 'Some instruction')
+        bench.validate_breeze_cfg(2.0, 'A gentle direction')
+        self.assertEqual(bench.variant_instruction('short12', 'Private instruction'), 'Private instruction')
+        self.assertEqual(bench.variant_instruction('plain40', 'Private instruction'), None)
+
+    def test_negative_prompt_error_has_actionable_redacted_category(self):
+        error = bench.RequestFailure(400,
+                '{"error": "Template ref_clone_tata does not define a negative prompt but cfg_scale=2.0"}')
+        label = bench.failure_label(error)
+        self.assertIn('CFG > 1', label)
+        self.assertNotIn('ref_clone_tata', label)
+        self.assertEqual(bench._retained_error_category({'status': 'error', 'error': str(error)}), label)
 
     def test_reference_inspection_and_private_pair_preparation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -220,6 +253,8 @@ class LongformTests(unittest.TestCase):
                 self.assertNotIn('reference_wav', manifest['runtime'])
                 self.assertEqual(len(StubHandler.requests), 4)
                 self.assertTrue(all(req['voice'] == 'foobar' for req in StubHandler.requests))
+                self.assertEqual(StubHandler.requests[0]['cfg_scale'], 1.0)
+                self.assertNotIn('instruction', StubHandler.requests[0])
                 self.assertIn('instruction', StubHandler.requests[-1])
                 self.assertNotIn('instruction', StubHandler.requests[0])
                 results = json.loads((folder / 'results.json').read_text())
