@@ -87,8 +87,86 @@ class LongformTests(unittest.TestCase):
             self.assertTrue(all(len(c.split()) <= size for c in chunks))
         self.assertRaises(ValueError, bench.passages, 'short', 1)
         self.assertRaises(ValueError, bench.sentences, '')
-        self.assertEqual(bench.passages('One complete paragraph.\n\nAnother complete paragraph.', 40),
-                         ['One complete paragraph.', 'Another complete paragraph.'])
+        self.assertEqual(' '.join(bench.passages('One complete paragraph.\n\nAnother complete paragraph.', 40)),
+                         'One complete paragraph. Another complete paragraph.')
+
+    def test_full_excerpt_is_identical_across_trial_policies(self):
+        source = bench.DEFAULT_EXCERPT.read_text(encoding='utf8')
+        excerpt, planned = bench.shared_excerpt(
+            source, {k:bench.VARIANTS[k] for k in bench.DEFAULT_VARIANTS}, None)
+        self.assertEqual(bench.normalize(excerpt), bench.normalize(source))
+        self.assertEqual(len(excerpt.split()), 148)
+        self.assertEqual(len(planned['plain40']), len(planned['directed40']))
+        self.assertGreater(len(planned['plain40']), len(planned['paragraph80']))
+        self.assertEqual([p.text for p in planned['plain40']],
+                         [p.text for p in planned['directed40']])
+        for key, pieces in planned.items():
+            with self.subTest(key=key):
+                self.assertEqual(bench.normalize(' '.join(p.text for p in pieces)),
+                                 bench.normalize(excerpt))
+                self.assertEqual(pieces[0].word_start, 0)
+                self.assertEqual(pieces[-1].word_end, 148)
+                self.assertTrue(all(p.words <= bench.VARIANTS[key]['max_words'] for p in pieces))
+                self.assertFalse(any(p.forced_sentence_split for p in pieces))
+                self.assertTrue(all(p.word_end == q.word_start
+                                    for p,q in zip(pieces,pieces[1:])))
+
+    def test_common_segment_budget_selects_same_complete_sentence_prefix(self):
+        source = bench.DEFAULT_EXCERPT.read_text(encoding='utf8')
+        chosen = {key:bench.VARIANTS[key]
+                  for key in ('short12','plain40','directed40','paragraph80')}
+        selected, plans = bench.shared_excerpt(source, chosen, 3)
+        self.assertLess(len(selected.split()), len(source.split()))
+        self.assertTrue(all(len(p) <= 3 for p in plans.values()))
+        self.assertTrue(all(bench.normalize(' '.join(s.text for s in p)) ==
+                            bench.normalize(selected) for p in plans.values()))
+        # A complete-sentence prefix is equivalent to an initial sequence
+        # of original sentences, never a floating word-budget cutoff.
+        source_sentences = [sentence for paragraph in source.split('\n\n')
+                            for sentence in bench.sentences(paragraph)]
+        self.assertTrue(any(bench.normalize(selected) == bench.normalize(' '.join(source_sentences[:n]))
+                            for n in range(1,len(source_sentences)+1)))
+        self.assertEqual([p.text for p in plans['plain40']],
+                         [p.text for p in plans['directed40']])
+        with self.assertRaisesRegex(ValueError, 'first complete sentence'):
+            bench.shared_excerpt(' '.join(['statement']*110)+'.',
+                                 {'tiny':dict(target_words=3,max_words=5)}, 1)
+
+    def test_sentence_preserving_balancing_and_rare_forced_splits(self):
+        from passage_planner import plan_passages, sentences
+        paragraph = ('Dr. Chen computes a stable invariant subspace. '
+                     'The first trial demonstrates the spectral gap. '
+                     'The next trial gives a corresponding perturbation theorem. '
+                     'The conclusion follows for each tested operator norm.')
+        groups = plan_passages(paragraph, target_words=16, hard_max_words=24)
+        self.assertTrue(all(p.words <= 24 for p in groups))
+        self.assertTrue(all(p.boundary_before in ('start','sentence') for p in groups))
+        self.assertEqual(bench.normalize(' '.join(p.text for p in groups)), bench.normalize(paragraph))
+        self.assertFalse(any(p.forced_sentence_split for p in groups))
+        self.assertEqual(bench.sentences('Dr. Chen works. She studies Fig. 3. The result is true.'),
+                         ['Dr. Chen works.', 'She studies Fig. 3.', 'The result is true.'])
+        self.assertEqual(sentences('"The result follows." Next, review it.'),
+                         ['"The result follows."', 'Next, review it.'])
+        # 49 words with max 24 should become balanced ~16-word pieces, not
+        # 24 + 24 + one isolated word.
+        lengthy = ' '.join(['projection']*48 + ['closes.'])
+        oversized = plan_passages(lengthy, target_words=20, hard_max_words=24)
+        self.assertEqual(sum(p.words for p in oversized),49)
+        self.assertEqual(len(oversized),3)
+        self.assertTrue(all(15 <= p.words <= 24 for p in oversized))
+        self.assertTrue(any(p.boundary_before=='forced_sentence_split' for p in oversized[1:]))
+        self.assertEqual(bench.normalize(' '.join(p.text for p in oversized)), lengthy)
+
+    def test_per_boundary_pause_preserves_pcm_frames(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = [root / f'{n}.wav' for n in range(3)]
+            for path in paths: path.write_bytes(fake_wav(.75))
+            result = bench.join_wavs(paths, root/'joined.wav', pause_seconds=[.10,.30])
+            self.assertEqual(result['expected_frames'], 3*6000 + 800 + 2400)
+            self.assertEqual(result['join_pauses_seconds'], [.1,.3])
+            with self.assertRaisesRegex(ValueError, 'one finite nonnegative pause'):
+                bench.join_wavs(paths, root/'bad.wav', pause_seconds=[.1])
 
     def test_variant_cfg_matches_breeze_template_requirements(self):
         self.assertEqual(bench.VARIANTS['short12']['cfg_scale'], 1.0)
@@ -248,10 +326,10 @@ class LongformTests(unittest.TestCase):
                 folder = bench.run(args)
                 manifest = json.loads((folder / 'manifest.json').read_text())
                 self.assertEqual(manifest['errors'], 0)
-                self.assertEqual(manifest['mechanically_valid'], 4)
+                self.assertEqual(manifest['mechanically_valid'], 3)
                 self.assertNotIn('model_dir', manifest['runtime'])
                 self.assertNotIn('reference_wav', manifest['runtime'])
-                self.assertEqual(len(StubHandler.requests), 4)
+                self.assertEqual(len(StubHandler.requests), 3)
                 self.assertTrue(all(req['voice'] == 'foobar' for req in StubHandler.requests))
                 self.assertEqual(StubHandler.requests[0]['cfg_scale'], 1.0)
                 self.assertNotIn('instruction', StubHandler.requests[0])
@@ -259,7 +337,7 @@ class LongformTests(unittest.TestCase):
                 self.assertNotIn('instruction', StubHandler.requests[0])
                 results = json.loads((folder / 'results.json').read_text())
                 self.assertTrue(all(r['status'] == 'needs_listening_review' for r in results))
-                self.assertEqual(len(list(folder.glob('**/audio.wav'))), 4)
+                self.assertEqual(len(list(folder.glob('**/audio.wav'))), 3)
                 self.assertEqual(len(list(folder.glob('*/joined.wav'))), 2)
                 measurements = json.loads((folder/'short12'/'joined.metrics.json').read_text())
                 self.assertEqual(measurements['joined_segments'], 2)
@@ -270,9 +348,9 @@ class LongformTests(unittest.TestCase):
                 StubHandler.clipped = True
                 second = bench.run(args)
                 failed = json.loads((second / 'manifest.json').read_text())
-                self.assertEqual(failed['errors'], 4)
+                self.assertEqual(failed['errors'], 3)
                 self.assertEqual(len(list(second.glob('**/audio.wav'))), 0)
-                self.assertEqual(len(list(second.glob('**/error.json'))), 4)
+                self.assertEqual(len(list(second.glob('**/error.json'))), 3)
                 self.assertEqual(len(list(second.glob('*/joined.wav'))), 0)
         finally:
             server.shutdown()
@@ -380,3 +458,104 @@ class FailureDiagnosticsTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)
+
+
+class EqualTextPipelineTests(unittest.TestCase):
+    def test_full_same_excerpt_run_and_focused_join_previews(self):
+        StubHandler.requests = []
+        StubHandler.clipped = False
+        server = ThreadingHTTPServer(('127.0.0.1',0), StubHandler)
+        thread = threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                args = argparse.Namespace(url=f'http://127.0.0.1:{server.server_port}',
+                                          voice='foobar', model=None, input=bench.DEFAULT_EXCERPT,
+                                          output_dir=root/'runs', variant=None, seed=42,
+                                          max_segments=None, timeout=15, join_pause=.15,
+                                          paragraph_pause=.30)
+                out = bench.run(args)
+                manifest = json.loads((out/'manifest.json').read_text())
+                self.assertEqual(manifest['comparison']['source_words'],148)
+                self.assertEqual(manifest['comparison']['evaluated_words'],148)
+                self.assertFalse(manifest['comparison']['truncated_for_budget'])
+                self.assertEqual(manifest['comparison']['segments_per_variant'],
+                                 {'plain40':4, 'directed40':4, 'paragraph80':3})
+                self.assertEqual(len(StubHandler.requests),11)
+                self.assertTrue((out/'evaluated.txt').is_file())
+                self.assertEqual(bench.normalize((out/'evaluated.txt').read_text()),
+                                 bench.normalize(bench.DEFAULT_EXCERPT.read_text()))
+                self.assertEqual(manifest['mechanically_valid'],11)
+                self.assertEqual(manifest['errors'],0)
+                hashes = set()
+                for name in bench.DEFAULT_VARIANTS:
+                    plan = json.loads((out/name/'plan.json').read_text())
+                    hashes.add(plan['shared_excerpt_sha256'])
+                    segment_texts = [json.loads(p.read_text())['input']
+                                     for p in sorted((out/name).glob('[0-9][0-9][0-9]/request.json'))]
+                    self.assertEqual(bench.normalize(' '.join(segment_texts)),
+                                     bench.normalize((out/'evaluated.txt').read_text()))
+                    self.assertEqual(len(list((out/name).glob('join-*.wav'))),len(segment_texts)-1)
+                    self.assertEqual(len(list((out/name).glob('join-*.json'))),len(segment_texts)-1)
+                    joined = json.loads((out/name/'joined.metrics.json').read_text())
+                    self.assertEqual(joined['shared_excerpt_sha256'],plan['shared_excerpt_sha256'])
+                    self.assertEqual(joined['joined_segments'],len(segment_texts))
+                self.assertEqual(len(hashes),1)
+                joins=(out/'JOIN_REVIEW.tsv').read_text().splitlines()
+                self.assertEqual(len(joins)-1,8)
+                self.assertTrue(all('join-' in line for line in joins[1:]))
+                summary=bench.report(out)
+                self.assertEqual(summary['comparison']['evaluated_words'],148)
+                self.assertEqual(summary['variants']['plain40']['words'],148)
+                self.assertEqual(summary['variants']['paragraph80']['words'],148)
+                self.assertNotIn('foobar',json.dumps(summary))
+                self.assertIn('cadence_inside_sentence',(out/'LISTEN_REVIEW.tsv').read_text())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_bounded_run_equal_excerpts_and_no_mid_sentence_budget_cut(self):
+        StubHandler.requests = []
+        StubHandler.clipped = False
+        server = ThreadingHTTPServer(('127.0.0.1',0), StubHandler)
+        thread = threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp)
+                args=argparse.Namespace(url=f'http://127.0.0.1:{server.server_port}',
+                                        voice='foobar',model=None,input=bench.DEFAULT_EXCERPT,
+                                        output_dir=root/'runs',variant=['short12','plain40','paragraph80'],
+                                        seed=17,max_segments=3,timeout=15,join_pause=.15,
+                                        paragraph_pause=.30)
+                out=bench.run(args)
+                manifest=json.loads((out/'manifest.json').read_text())
+                self.assertTrue(manifest['comparison']['truncated_for_budget'])
+                self.assertLess(manifest['comparison']['evaluated_words'],148)
+                excerpt=bench.normalize((out/'evaluated.txt').read_text())
+                for name in args.variant:
+                    rows=json.loads((out/name/'plan.json').read_text())['segments']
+                    self.assertLessEqual(len(rows),3)
+                    self.assertEqual(bench.normalize(' '.join(r['text'] for r in rows)),excerpt)
+                self.assertEqual(bench.report(out)['failures'],0)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_join_window_preview_uses_end_and_start_without_reencoding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            a=root/'a.wav';b=root/'b.wav';out=root/'join.wav'
+            a.write_bytes(fake_wav(4.0));b.write_bytes(fake_wav(3.0))
+            info=bench.boundary_preview(a,b,out,pause_seconds=.30,context_seconds=1.5)
+            self.assertEqual(info['expected_frames'],round((1.5+.3+1.5)*8000))
+            self.assertEqual(bench.inspect_wav(out)['frames'],info['expected_frames'])
+            with self.assertRaisesRegex(ValueError,'matching PCM16'):
+                mismatch=root/'mismatch.wav'
+                with wave.open(str(mismatch),'wb') as wav:
+                    wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(16000)
+                    wav.writeframes(b'\0\0'*16000)
+                bench.boundary_preview(a,mismatch,out,pause_seconds=.1)

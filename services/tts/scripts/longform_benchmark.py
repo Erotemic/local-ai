@@ -25,21 +25,32 @@ import urllib.error
 import urllib.request
 import wave
 
+from passage_planner import (plan_passages, sentences, shared_excerpt, normalize)
+
 HERE = Path(__file__).resolve()
 REPO = HERE.parents[3]
 DEFAULT_EXCERPT = HERE.parents[1] / 'fixtures' / 'longform-math.txt'
-VERSION = 2
+VERSION = 3
 MAX_RESPONSE_BYTES = 64 * 1024 * 1024
-# Use fixed complete passages for paired configurations. A long sentence is
-# split only when it cannot fit the selected word budget.
-ABBREVIATIONS = {'dr.', 'mr.', 'mrs.', 'prof.', 'fig.', 'eq.', 'e.g.', 'i.e.', 'etc.'}
+# These are *benchmarks*, not validated defaults for production serving.
+# target_words is a soft objective; max_words is a separate hard safety bound.
+# Default trials compare the complete same excerpt. short12 is a diagnostic
+# baseline, not a recommended production configuration.
 VARIANTS = {
-    'short12': dict(max_words=12, cfg_scale=1.0, instruction=None),
-    'plain40': dict(max_words=40, cfg_scale=1.0, instruction=None),
-    'directed40': dict(max_words=40, cfg_scale=2.0,
+    'short12': dict(target_words=12, max_words=24, cfg_scale=1.0, instruction=None),
+    'plain40': dict(target_words=40, max_words=52, cfg_scale=1.0, instruction=None),
+    'directed40': dict(target_words=40, max_words=52, cfg_scale=2.0,
                        instruction='Speak in a natural, measured mathematical lecture style.'),
-    'paragraph80': dict(max_words=80, cfg_scale=1.0, instruction=None),
+    'paragraph80': dict(target_words=80, max_words=110, cfg_scale=1.0, instruction=None),
 }
+DEFAULT_VARIANTS = ['plain40', 'directed40', 'paragraph80']
+
+
+def passages(text: str, max_words: int) -> list[str]:
+    """Compatibility wrapper for strict-budget planning and existing callers."""
+    return [p.text.replace('\n\n', ' ') for p in
+            plan_passages(text, target_words=max_words,
+                          hard_max_words=max_words)]
 
 
 def sha256(data: bytes) -> str:
@@ -54,62 +65,6 @@ def atomic_json(path: Path, data: object) -> None:
         temp.replace(path)
     finally:
         temp.unlink(missing_ok=True)
-
-
-def sentences(text: str) -> list[str]:
-    """Boundaries at terminal punctuation; retain every spoken word exactly."""
-    normalized = re.sub(r'\s+', ' ', text).strip()
-    if not normalized:
-        raise ValueError('text is empty')
-    parts = []
-    start = 0
-    for m in re.finditer(r'[.!?]["”\)\]]*(?:\s+|$)', normalized):
-        preceding = normalized[start:m.start()+1].split()
-        last = preceding[-1].lower() if preceding else ''
-        if last in ABBREVIATIONS or re.fullmatch(r'[A-Z]\.', preceding[-1] if preceding else ''):
-            continue
-        end = m.start() + len(m.group().rstrip())
-        candidate = normalized[start:end].strip()
-        if candidate:
-            parts.append(candidate)
-        start = m.end()
-    if normalized[start:].strip():
-        parts.append(normalized[start:].strip())
-    if ' '.join(' '.join(parts).split()) != normalized:
-        raise AssertionError('sentence splitter lost or duplicated text')
-    return parts
-
-
-def passages(text: str, max_words: int) -> list[str]:
-    if max_words < 2:
-        raise ValueError('max_words must be at least two')
-    output: list[str] = []
-    pending: list[str] = []
-    pending_words = 0
-    for paragraph in re.split(r'\n\s*\n', text):
-        if not paragraph.strip():
-            continue
-        # Paragraphs are semantic boundaries for lecture narration. Even a
-        # larger trial should not merge the end of one paragraph into the next.
-        for sentence in sentences(paragraph):
-            words = sentence.split()
-            for offset in range(0, len(words), max_words):
-                fragment = words[offset: offset + max_words]
-                if pending and pending_words + len(fragment) > max_words:
-                    output.append(' '.join(pending))
-                    pending = []
-                    pending_words = 0
-                pending.extend(fragment)
-                pending_words += len(fragment)
-        if pending:
-            output.append(' '.join(pending))
-            pending = []
-            pending_words = 0
-    if pending:
-        output.append(' '.join(pending))
-    assert all(0 < len(chunk.split()) <= max_words for chunk in output)
-    assert ' '.join(output) == ' '.join(text.split())
-    return output
 
 
 def inspect_wav_bytes(wav_data: bytes) -> dict:
@@ -156,14 +111,19 @@ def inspect_wav(path: Path) -> dict:
     return inspect_wav_bytes(path.read_bytes())
 
 
-def join_wavs(paths: list[Path], output: Path, *, pause_seconds: float) -> dict:
+def join_wavs(paths: list[Path], output: Path, *,
+              pause_seconds: float | list[float]) -> dict:
     """Build a listening preview without re-encoding or discarding samples.
 
     PCM16 inputs must agree on rate/channels; a mismatch is reported rather
     than silently resampling one of the experimental outputs.
     """
-    if not paths or pause_seconds < 0 or not math.isfinite(pause_seconds):
-        raise ValueError('joining requires audio files and a finite nonnegative pause')
+    if not paths:
+        raise ValueError('joining requires audio files')
+    pauses = ([float(pause_seconds)] * (len(paths)-1) if isinstance(pause_seconds, (int,float))
+              else list(pause_seconds))
+    if len(pauses) != len(paths)-1 or any(p < 0 or not math.isfinite(p) for p in pauses):
+        raise ValueError('joining requires one finite nonnegative pause per boundary')
     pcm = []
     spec = None
     expected_frames = 0
@@ -182,15 +142,15 @@ def join_wavs(paths: list[Path], output: Path, *, pause_seconds: float) -> dict:
             pcm.append(content)
             expected_frames += frames
     assert spec is not None
-    silent_frames = round(pause_seconds * spec[2])
-    expected_frames += (len(paths) - 1) * silent_frames
+    silent_frames = [round(pause * spec[2]) for pause in pauses]
+    expected_frames += sum(silent_frames)
     with wave.open(str(output), 'wb') as merged:
         merged.setnchannels(spec[0])
         merged.setsampwidth(spec[1])
         merged.setframerate(spec[2])
         for idx, data in enumerate(pcm):
             if idx:
-                merged.writeframesraw(b'\0' * (silent_frames * spec[0] * spec[1]))
+                merged.writeframesraw(b'\0' * (silent_frames[idx-1] * spec[0] * spec[1]))
             merged.writeframesraw(data)
     with wave.open(str(output), 'rb') as joined:
         if joined.getnframes() != expected_frames:
@@ -198,9 +158,59 @@ def join_wavs(paths: list[Path], output: Path, *, pause_seconds: float) -> dict:
             raise ValueError('joined WAV lost frames')
     measurements = inspect_wav(output)
     measurements['joined_segments'] = len(paths)
-    measurements['pause_seconds'] = pause_seconds
+    measurements['join_pauses_seconds'] = pauses
+    measurements['pause_seconds'] = pause_seconds if isinstance(pause_seconds,(int,float)) else None
     measurements['expected_frames'] = expected_frames
     return measurements
+
+
+def boundary_preview(previous: Path, following: Path, output: Path, *,
+                     pause_seconds: float, context_seconds: float = 3.0) -> dict:
+    """Write a short, lossless listening snippet around a speech join.
+
+    The last context_seconds of the prior segment and the first context_seconds
+    of the next segment are retained. These previews support focused review of
+    timbre, tempo, intonation and transition timing without ASR inference.
+    """
+    if not (math.isfinite(context_seconds) and context_seconds > 0):
+        raise ValueError('join context must be finite and positive')
+    if not (math.isfinite(pause_seconds) and pause_seconds >= 0):
+        raise ValueError('join pause must be finite and nonnegative')
+    parts = []
+    spec = None
+    for path, tail in [(previous, True), (following, False)]:
+        with wave.open(str(path), 'rb') as source:
+            fmt = source.getnchannels(), source.getsampwidth(), source.getframerate()
+            if fmt[1] != 2 or (spec is not None and spec != fmt):
+                raise ValueError('join previews require matching PCM16 WAV formats')
+            spec = fmt
+            total = source.getnframes()
+            keep = min(total, max(1, round(context_seconds * fmt[2])))
+            if tail:
+                source.setpos(total - keep)
+            pcm = source.readframes(keep)
+            if len(pcm) != keep * fmt[0] * fmt[1]:
+                raise ValueError('join preview found incomplete WAV data')
+            parts.append((keep, pcm))
+    assert spec is not None
+    quiet = round(pause_seconds * spec[2])
+    expected_frames = parts[0][0] + quiet + parts[1][0]
+    with wave.open(str(output), 'wb') as wav:
+        wav.setnchannels(spec[0])
+        wav.setsampwidth(spec[1])
+        wav.setframerate(spec[2])
+        wav.writeframesraw(parts[0][1])
+        wav.writeframesraw(b'\0' * (quiet * spec[0] * spec[1]))
+        wav.writeframesraw(parts[1][1])
+    metrics = inspect_wav(output)
+    if metrics['frames'] != expected_frames:
+        output.unlink(missing_ok=True)
+        raise ValueError('join preview lost audio samples')
+    return dict(expected_frames=expected_frames,
+                before_context_seconds=round(parts[0][0]/spec[2], 4),
+                after_context_seconds=round(parts[1][0]/spec[2], 4),
+                pause_seconds=pause_seconds,
+                duration_seconds=metrics['duration_seconds'])
 
 
 def _request(url: str, *, payload: dict | None = None, timeout: float = 20) -> tuple[bytes, dict]:
@@ -330,13 +340,18 @@ def run(args: argparse.Namespace) -> Path:
     text = args.input.read_text(encoding='utf8')
     if not text.strip():
         raise ValueError('input text is empty')
-    chosen = args.variant or ['short12', 'plain40', 'directed40', 'paragraph80']
+    chosen = args.variant or DEFAULT_VARIANTS
     unknown = set(chosen) - set(VARIANTS)
     if unknown:
         raise ValueError(f'unknown variants: {sorted(unknown)}')
     limit = args.max_segments
-    if limit < 1:
-        raise ValueError('--max-segments must be positive')
+    excerpt, variant_plans = shared_excerpt(text, {name: VARIANTS[name] for name in chosen}, limit)
+    excerpt_sha = sha256(normalize(excerpt).encode('utf8'))
+    excerpt_words = len(excerpt.split())
+    source_words = len(text.split())
+    if any(normalize(' '.join(p.text for p in plan)) != normalize(excerpt)
+           for plan in variant_plans.values()):
+        raise AssertionError('selected variants do not cover the identical excerpt')
     # Quoted, unset shell variables are otherwise parsed as an empty voice.
     # Catch this before the network probe or the creation of any run artifacts.
     validate_voice(args.voice, {})
@@ -360,10 +375,23 @@ def run(args: argparse.Namespace) -> Path:
                             variant_instruction(name, baseline_instruction))
     out = make_run_dir(verify_output_dir(args.output_dir))
     (out / 'input.txt').write_text(text, encoding='utf8')
+    (out / 'evaluated.txt').write_text(excerpt + '\n', encoding='utf8')
+    for name, plan in variant_plans.items():
+        atomic_json(out / name / 'plan.json',
+                    dict(target_words=VARIANTS[name]['target_words'],
+                         hard_max_words=VARIANTS[name]['max_words'],
+                         shared_excerpt_sha256=excerpt_sha,
+                         segments=[p.record() for p in plan]))
     manifest = dict(schema=VERSION, created_utc=datetime.now(timezone.utc).isoformat(),
                     source_sha256=sha256(text.encode('utf8')), model=model,
                     voice=args.voice, endpoint=base, runtime=runtime,
                     seed=args.seed, variants=chosen, reference_identity=reference_identity,
+                    comparison=dict(mode='full' if limit is None else 'shared_sentence_prefix',
+                                    source_words=source_words, evaluated_words=excerpt_words,
+                                    evaluated_text_sha256=excerpt_sha,
+                                    truncated_for_budget=excerpt_words < source_words,
+                                    max_segments_per_variant=limit,
+                                    segments_per_variant={name:len(plan) for name,plan in variant_plans.items()}),
                     baseline_instruction_sha256=(sha256(baseline_instruction.encode('utf8')) if baseline_instruction else None),
                     status='running',
                     note='WAV completeness requires listening/ASR review; no automatic coverage proof')
@@ -373,9 +401,10 @@ def run(args: argparse.Namespace) -> Path:
     abort_reason = None
     for name in chosen:
         variant = VARIANTS[name]
-        pieces = passages(text, variant['max_words'])[:limit]
+        pieces = variant_plans[name]
         variant_rows = []
-        for i, piece in enumerate(pieces):
+        for i, passage in enumerate(pieces):
+            piece = passage.text
             folder = out / name / f'{i:03d}'
             folder.mkdir(parents=True, exist_ok=False)
             payload = dict(model=model, voice=args.voice, input=piece,
@@ -385,8 +414,11 @@ def run(args: argparse.Namespace) -> Path:
             if instruction is not None:
                 payload['instruction'] = instruction
             atomic_json(folder / 'request.json', payload)
-            row = dict(variant=name, segment=i, words=len(piece.split()),
+            row = dict(variant=name, segment=i, words=passage.words,
                        characters=len(piece), text_sha256=sha256(piece.encode('utf8')),
+                       word_start=passage.word_start, word_end=passage.word_end,
+                       boundary_before=passage.boundary_before,
+                       forced_sentence_split=passage.forced_sentence_split,
                        status='error')
             start = time.perf_counter()
             try:
@@ -425,10 +457,26 @@ def run(args: argparse.Namespace) -> Path:
             preview = out / name / 'joined.wav'
             files = [out / name / f'{i:03d}' / 'audio.wav' for i in range(len(variant_rows))]
             try:
-                joined = join_wavs(files, preview, pause_seconds=args.join_pause)
+                paragraph_pause = getattr(args, 'paragraph_pause', None)
+                if paragraph_pause is None:
+                    paragraph_pause = args.join_pause * 2
+                pauses = [(0.0 if segment.boundary_before == 'forced_sentence_split'
+                           else paragraph_pause if segment.boundary_before == 'paragraph'
+                           else args.join_pause)
+                          for segment in pieces[1:]]
+                joined = join_wavs(files, preview, pause_seconds=pauses)
+                joined['shared_excerpt_sha256'] = excerpt_sha
+                joined['join_boundary_types'] = [s.boundary_before for s in pieces[1:]]
                 joined['wav_sha256'] = sha256(preview.read_bytes())
                 atomic_json(out / name / 'joined.metrics.json', joined)
                 joins[name] = dict(status='needs_listening_review', **joined)
+                for idx, (pause, boundary) in enumerate(zip(pauses, pieces[1:]), start=1):
+                    transition = out / name / f'join-{idx:03d}.wav'
+                    metrics = boundary_preview(files[idx-1], files[idx], transition,
+                                               pause_seconds=pause)
+                    atomic_json(transition.with_suffix('.json'),
+                                dict(from_segment=idx-1, to_segment=idx,
+                                     boundary_type=boundary.boundary_before, **metrics))
             except (OSError, ValueError, wave.Error) as exc:
                 preview.unlink(missing_ok=True)
                 joins[name] = dict(status='error', error=f'{type(exc).__name__}: {exc}')
@@ -447,12 +495,33 @@ def run(args: argparse.Namespace) -> Path:
     manifest['errors'] = len(rows) - manifest['mechanically_valid']
     atomic_json(out / 'manifest.json', manifest)
     # Human review must explicitly approve each segment and each join.
-    fields = ['variant', 'segment', 'completeness', 'voice_consistency',
-              'naturalness', 'math_pronunciation', 'joins', 'notes']
+    fields = ['variant', 'segment', 'word_start', 'word_end', 'boundary_before',
+              'forced_sentence_split', 'completeness', 'voice_consistency',
+              'naturalness', 'cadence_inside_sentence', 'boundary_transition',
+              'math_pronunciation', 'joins', 'notes']
     lines = ['\t'.join(fields)]
     for row in rows:
         lines.append('\t'.join(str(row.get(k, '')) for k in fields))
     (out / 'LISTEN_REVIEW.tsv').write_text('\n'.join(lines) + '\n', encoding='utf8')
+    join_review = ['\t'.join(['variant', 'from_segment', 'to_segment',
+                                  'boundary_type', 'pause_seconds', 'join_preview',
+                                  'cadence_continuity', 'voice_consistency', 'notes'])]
+    for name in chosen:
+        pieces = variant_plans[name]
+        for index, passage in enumerate(pieces[1:], start=1):
+            clip = f'{name}/join-{index:03d}.wav'
+            if not (out / clip).exists():
+                continue
+            paragraph_pause = getattr(args, 'paragraph_pause', None)
+            if paragraph_pause is None:
+                paragraph_pause = args.join_pause * 2
+            pause = (0.0 if passage.boundary_before == 'forced_sentence_split'
+                     else paragraph_pause if passage.boundary_before == 'paragraph'
+                     else args.join_pause)
+            fields = [name, index-1, index, passage.boundary_before,
+                      pause, clip, '', '', '']
+            join_review.append('\t'.join(map(str, fields)))
+    (out / 'JOIN_REVIEW.tsv').write_text('\n'.join(join_review) + '\n', encoding='utf8')
     return out
 
 
@@ -485,9 +554,26 @@ def report(run_directory: Path) -> dict:
             continue
         category = _retained_error_category(row)
         counts[category] = counts.get(category, 0) + 1
-    return dict(status=manifest.get('status'), segments=len(rows),
-                failures=sum(counts.values()), categories=counts,
-                hint='Inspect the run directory error.json privately for full server details')
+    summary = dict(status=manifest.get('status'), segments=len(rows),
+                   failures=sum(counts.values()), categories=counts,
+                   hint='Inspect the run directory error.json privately for full server details')
+    # V3 exposes coverage comparability without printing any voice or text.
+    if isinstance(manifest.get('comparison'), dict):
+        summary['comparison'] = manifest['comparison']
+        by_variant = {}
+        for name in manifest.get('variants', []):
+            subset = [row for row in rows if row['variant'] == name]
+            joined_path = directory / name / 'joined.metrics.json'
+            joined = json.loads(joined_path.read_text()) if joined_path.is_file() else {}
+            levels = [row['rms_dbfs'] for row in subset if row.get('rms_dbfs') is not None]
+            by_variant[name] = dict(segments=len(subset),
+                                    completed=sum(r['status']=='needs_listening_review' for r in subset),
+                                    words=sum(r.get('words',0) for r in subset),
+                                    joined_seconds=joined.get('duration_seconds'),
+                                    rms_range_db=round(max(levels)-min(levels),3) if levels else None,
+                                    forced_sentence_splits=sum(bool(r.get('forced_sentence_split')) for r in subset))
+        summary['variants'] = by_variant
+    return summary
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -496,6 +582,8 @@ def make_parser() -> argparse.ArgumentParser:
     plan = sub.add_parser('plan', help='print deterministic passage sizes without contacting a server')
     plan.add_argument('--input', type=Path, default=DEFAULT_EXCERPT)
     plan.add_argument('--variant', action='append', choices=sorted(VARIANTS))
+    plan.add_argument('--max-segments', type=int,
+                      help='optional equal-text sentence-prefix cap, per variant')
     summary = sub.add_parser('report', help='summarize a previous run without speaker identifiers')
     summary.add_argument('--run-dir', required=True, type=Path)
     runp = sub.add_parser('run', help='retain a benchmark run against an existing Breeze endpoint')
@@ -512,10 +600,12 @@ def make_parser() -> argparse.ArgumentParser:
     runp.add_argument('--output-dir', type=Path, required=True,
                       help='artifact parent outside this Git repository')
     runp.add_argument('--variant', action='append', choices=sorted(VARIANTS))
-    runp.add_argument('--max-segments', type=int, default=3,
-                      help='per variant (default: three adjacent passages)')
+    runp.add_argument('--max-segments', type=int, default=None,
+                      help='optional request budget per variant; compare the same complete-sentence prefix')
     runp.add_argument('--timeout', type=float, default=300)
-    runp.add_argument('--join-pause', type=float, default=0.15, help='inter-segment preview pause in seconds')
+    runp.add_argument('--join-pause', type=float, default=0.15, help='sentence-join preview pause, seconds')
+    runp.add_argument('--paragraph-pause', type=float, default=0.30,
+                      help='paragraph-join preview pause, seconds')
     runp.add_argument('--seed', type=int, default=42)
     return parser
 
@@ -524,10 +614,20 @@ def main(argv: list[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
     if args.command == 'plan':
         text = args.input.read_text(encoding='utf8')
-        rows = {key: [dict(words=len(s.split()), characters=len(s), text_sha256=sha256(s.encode()))
-                      for s in passages(text, VARIANTS[key]['max_words'])]
-                for key in (args.variant or list(VARIANTS))}
-        print(json.dumps(rows, indent=2))
+        chosen = args.variant or DEFAULT_VARIANTS
+        excerpt, plans = shared_excerpt(text, {name: VARIANTS[name] for name in chosen},
+                                        args.max_segments)
+        summary = dict(source_words=len(text.split()), evaluated_words=len(excerpt.split()),
+                       evaluated_text_sha256=sha256(normalize(excerpt).encode()),
+                       full_coverage=len(excerpt.split()) == len(text.split()),
+                       max_segments_per_variant=args.max_segments)
+        rows = {key: [dict(words=p.words, characters=len(p.text),
+                            word_start=p.word_start, word_end=p.word_end,
+                            boundary_before=p.boundary_before,
+                            forced_sentence_split=p.forced_sentence_split,
+                            text_sha256=sha256(p.text.encode())) for p in segments]
+                for key, segments in plans.items()}
+        print(json.dumps(dict(comparison=summary, variants=rows), indent=2))
         return 0
     if args.command == 'report':
         print(json.dumps(report(args.run_dir), indent=2))
