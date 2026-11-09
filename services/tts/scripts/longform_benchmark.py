@@ -588,7 +588,8 @@ def make_parser() -> argparse.ArgumentParser:
     summary.add_argument('--run-dir', required=True, type=Path)
     runp = sub.add_parser('run', help='retain a benchmark run against an existing Breeze endpoint')
     runp.add_argument('--url', required=True, help='server base URL, without /v1')
-    runp.add_argument('--voice', required=True, help='name of an authorized voice installed on the server')
+    runp.add_argument('--voice', default=os.environ.get('TTS_BENCH_VOICE') or 'crall-math-dk-v2',
+                      help='voice ID (default: TTS_BENCH_VOICE or public crall-math-dk-v2)')
     runp.add_argument('--model', help='override /v1/models discovery')
     runp.add_argument('--reference-wav', type=Path,
                       help='local reference WAV, used only for private digest/quality metadata')

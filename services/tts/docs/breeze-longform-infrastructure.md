@@ -29,14 +29,18 @@ Then, with a Breeze server already running and an authorized voice installed, co
 ```bash
 python3 services/tts/scripts/longform_benchmark.py run \
     --url http://127.0.0.1:8821 \
-    --voice "${TTS_BENCH_VOICE:?Set your local benchmark voice first}" \
     --input services/tts/fixtures/longform-math.txt \
     --output-dir "$HOME/.cache/local-ai/tts-longform"
 ```
 
 For a smaller smoke test, add `--max-segments 3`. This now selects the **longest complete-sentence prefix common to every selected variant**, with no more than three synthesis calls per variant. The complete 148-word fixture is not covered by this reduced run. Use `--variant short12` explicitly to include the short baseline, or multiple `--variant` flags to choose a subset. The default has changed from four variants to `plain40`, `directed40`, and `paragraph80`; no `--max-segments` limit means full input coverage.
 
-`foobar` is a **distributable example name**, not an included voice. Set `TTS_BENCH_VOICE` privately at runtime; do not put personal voice identifiers, WAVs, transcripts, instructions, or experiment output in Git. An unset or empty variable now aborts before the benchmark contacts the server. The server base URL is shown for a local deployment exposing host port `8821`; use the actual port reported by `docker ps` if it differs. For a real lecture, point `--input` at a private extracted spoken transcript outside this server repository. A larger input provides more adjacent passages for meaningful comparisons.
+The benchmark uses the public voice `crall-math-dk-v2` by default. Setting
+`TTS_BENCH_VOICE` overrides it, and `--voice` takes precedence over both.
+`foobar` is a **distributable example name**, not an included voice. Do not put
+personal voice identifiers, WAVs, transcripts, instructions, or experiment
+output in Git. An explicitly selected voice is validated against the server's
+advertised voices before the benchmark creates any experiment artifacts. The server base URL is shown for a local deployment exposing host port `8821`; use the actual port reported by `docker ps` if it differs. For a real lecture, point `--input` at a private extracted spoken transcript outside this server repository. A larger input provides more adjacent passages for meaningful comparisons.
 
 The first checks after a failed benchmark should be:
 
@@ -88,3 +92,66 @@ Run offline tests with:
 ```bash
 python3 -m unittest discover -s services/tts/scripts -p 'test_longform_benchmark.py' -v
 ```
+
+
+## Production paragraph80 server integration
+
+The Breeze server has a separate opt-in `long_form: true` request mode on its
+normal speech endpoint. That mode uses the existing sentence planner with
+80-word soft target, 110-word hard maximum, CFG 1.0, and no delivery
+instruction. It independently generates passages and concatenates their PCM,
+with 150 ms sentence joins and 300 ms paragraph joins. No pause is inserted
+for a forced mid-sentence split. By default, a generated passage reaching 45 seconds or
+having implausibly little audio for its text is split and regenerated; this is
+a safeguard rather than word-level speech verification.
+
+The server returns a policy header and passage timing metadata with its audio.
+The DKPS reader can request a complete page using this mode and reject old
+server versions that silently ignore the new option. Other OpenAI-compatible
+speech requests remain unchanged. Implementations live in
+`scripts/longform_speech.py`, `scripts/passage_planner.py`, and
+`scripts/candidate_server.py`. Unit tests use a simulated model and HTTP server.
+
+The original `longform_benchmark.py` remains separate from production; its
+alternate configurations are useful for comparisons, not server defaults.
+Voice selection, reference audio, and seed stay request-specific. Any
+voice-specific experimental data should be saved in untracked private storage.
+
+Tune the per-request duration safety threshold using `TTS_BREEZE_LONGFORM_MAX_SECONDS` in the TTS service environment and rebuild/recreate the container. The default is 45 seconds.
+
+## Async paragraph80 jobs and cooperative cancellation
+
+The paragraph80 endpoint also supports non-blocking jobs, which allow lecture
+clients to display queue progress and cancel generation. The existing
+`POST /v1/audio/speech` endpoint is unchanged for one-shot clients.
+
+- `POST /v1/audio/jobs`: accepts the same `long_form: true`, plain-clone WAV
+  speech request as `/v1/audio/speech`, plus `job_priority` (integer 0–20,
+  smaller runs first). Responds with HTTP 202 and a random job `id`.
+- `GET /v1/audio/jobs/{id}`: returns `queued`, `rendering`, `canceling`,
+  `cancelled`, `ready`, or `error`, with completed/total words and passage counts,
+  elapsed time, and queued position when applicable.
+- `GET /v1/audio/jobs/{id}/audio`: available on `ready`. Returns the joined
+  WAV and the same paragraph80 timing and policy headers as the blocking API.
+- `DELETE /v1/audio/jobs/{id}`: cancels queued jobs immediately and requests
+  interruption of active jobs at their next passage boundary. An inference
+  already underway finishes before the cancellation can take effect.
+
+The server serializes these background jobs onto one GPU worker by default,
+prioritizes interactive requests over prefetch, and limits waiting work to 12
+jobs. Completed results are retained in process memory for 15 minutes, so
+clients should promptly download finished WAVs. Restarting the server loses
+pending jobs, but recordings already cached by the reader are unaffected.
+
+Example with a distributable placeholder voice:
+
+```bash
+curl -fsS http://127.0.0.1:8821/v1/audio/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"breeze-tts2","voice":"foobar","input":"A complete paragraph explaining the spectral gap.","response_format":"wav","long_form":true,"cfg_scale":1.0,"job_priority":0}'
+```
+
+Job status deliberately does not include input text, voice identifiers, or
+reference paths. Keep voice-specific local experiment directories and any
+private voice configuration outside Git. Real-time progress counts completed
+synthesis passages, not partial progress inside a model inference call.

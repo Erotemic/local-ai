@@ -78,6 +78,20 @@ class StubHandler(BaseHTTPRequestHandler):
 
 
 class LongformTests(unittest.TestCase):
+    def test_public_voice_default_and_environment_override(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {}, clear=True):
+            args = bench.make_parser().parse_args(['run', '--url', 'http://localhost:8821',
+                                                    '--output-dir', '/tmp/breeze-out'])
+            self.assertEqual(args.voice, 'crall-math-dk-v2')
+        with patch.dict(os.environ, {'TTS_BENCH_VOICE': 'foobar'}):
+            args = bench.make_parser().parse_args(['run', '--url', 'http://localhost:8821',
+                                                    '--output-dir', '/tmp/breeze-out'])
+            self.assertEqual(args.voice, 'foobar')
+        args = bench.make_parser().parse_args(['run', '--url', 'http://localhost:8821',
+                                               '--output-dir', '/tmp/breeze-out', '--voice', 'ryan'])
+        self.assertEqual(args.voice, 'ryan')
+
     def test_sentence_splitting_and_passage_coverage(self):
         text = 'Dr. Brown studies matrices. The eigenspaces are stable. \'A spectral gap helps.\' Next we compare them!'
         self.assertEqual(' '.join(bench.sentences(text)), text)
