@@ -24,6 +24,12 @@ required = [
   "PRIMARY_GPU",
 ]
 
+# Only replace these values when upgrading an old service config that still
+# uses the former recipe defaults. Explicit custom pins are preserved.
+[config.previous_defaults]
+COMFYUI_IMAGE = "local/comfyui:v0.31.0"
+COMFYUI_REF = "v0.31.0"
+
 [defaults]
 COMFY_DATA_ROOT = "{LOCAL_AI_SERVICE_ROOT}/comfyui"
 
@@ -113,3 +119,28 @@ check_files = [
   "vae/minimax_h3_video_vae_fp16.safetensors",
   "vae/minimax_h3_audio_vae_fp32.safetensors",
 ]
+
+[[models]]
+name = "minimax-h3-image"
+label = "MiniMax H3 Image native ComfyUI bundle"
+required = false
+source = "huggingface"
+source_label = "hf://Comfy-Org/MiniMax-H3-Image"
+repository = "Comfy-Org/MiniMax-H3-Image"
+destination = "{HF_REPOS_ROOT}/Comfy-Org/MiniMax-H3-Image"
+container_path = "/models/hf/Comfy-Org/MiniMax-H3-Image"
+include = [
+  "diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors",
+  "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+  "vae/minimax_h3_image_vae_fp16.safetensors",
+]
+check_files = [
+  "diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors",
+  "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+  "vae/minimax_h3_image_vae_fp16.safetensors",
+]
+
+# The Comfy-Org/MiniMax-H3 video bundle provides the identical Qwen3-VL encoder.
+# Its directory is already registered in extra_model_paths.yaml.
+[models.alternate_files]
+"text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors" = "{HF_REPOS_ROOT}/Comfy-Org/MiniMax-H3/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"

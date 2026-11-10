@@ -5,7 +5,7 @@ FROM ${BASE_COMFYUI_IMAGE}
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG COMFYUI_REF=v0.31.0
+ARG COMFYUI_REF=v0.45.0
 
 RUN set -eux; \
     cd /opt/comfyui; \

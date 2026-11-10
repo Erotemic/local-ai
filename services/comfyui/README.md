@@ -1,8 +1,9 @@
 # ComfyUI service
 
 General local ComfyUI service. The service is not tied to one model family.
-MiniMax H3 is retained as an optional declared model bundle rather than part of
-the service identity.
+MiniMax H3 video and MiniMax H3 Image are optional declared bundles rather
+than part of the service identity. The recipe pins ComfyUI v0.45.0 for native
+H3 Image support.
 
 ## First use
 
@@ -37,36 +38,42 @@ The UI defaults to `http://127.0.0.1:8188`.
 Available now:
 
 ```text
-minimax-h3
+minimax-h3           (video)
+minimax-h3-image     (text-to-image and reference editing)
 ```
 
-Select it while editing `.env`:
+Select the desired bundle while editing `.env`:
 
 ```dotenv
-COMFYUI_MODEL_BUNDLES=minimax-h3
+COMFYUI_MODEL_BUNDLES=minimax-h3-image
 ```
 
 Then ordinary setup provisions the selected files into:
 
 ```text
-/data/services/hf-repos/Comfy-Org/MiniMax-H3/
+/data/services/hf-repos/Comfy-Org/MiniMax-H3-Image/
 ```
 
 You can also request it for one setup run:
 
 ```bash
-./setup.sh --with-model minimax-h3
+./setup.sh --with-model minimax-h3-image
 ```
 
 The existing mapping in `extra_model_paths.yaml` exposes that canonical tree to
 native ComfyUI model loaders without copying it into private ComfyUI state.
-Model-specific notes live in `docs/minimax-h3.md`.
+For both, use `COMFYUI_MODEL_BUNDLES=minimax-h3,minimax-h3-image`. The image
+bundle reuses the video bundle's Qwen3-VL text encoder when available, without
+making the video bundle a dependency. Model-specific notes live in
+`docs/minimax-h3.md` and `docs/minimax-h3-image.md`.
 
 Low-level maintenance commands, after setup has initialized configuration:
 
 ```bash
 ./scripts/check_minimax_h3_models.sh
 ./scripts/download_minimax_h3_comfy.sh
+./scripts/check_minimax_h3_image_comfy.sh
+./scripts/download_minimax_h3_image_comfy.sh
 ```
 
 ## GPU selection

@@ -72,9 +72,14 @@ def validate_env_syntax(path: Path) -> None:
 
 
 def render_template_with_existing(
-    template_path: Path, existing_path: Path, *, drop_keys: set[str] | None = None
+    template_path: Path,
+    existing_path: Path,
+    *,
+    drop_keys: set[str] | None = None,
+    previous_defaults: dict[str, str] | None = None,
 ) -> str:
     text = template_path.read_text()
+    template_values = parse_env(template_path)
     if not existing_path.is_file():
         return text
     existing = parse_env(existing_path)
@@ -92,9 +97,15 @@ def render_template_with_existing(
                 # Schema version markers come from the checked-in template; all
                 # other configured values preserve the user's current choice.
                 if key in existing and not key.endswith("_CONFIG_VERSION"):
-                    prefix = "export " if stripped.startswith("export ") else ""
-                    rendered.append(f"{prefix}{key}={existing[key]}")
-                    continue
+                    # During a schema upgrade, advance values that still match
+                    # a previous recipe default. Preserve user-selected values.
+                    old_default = (previous_defaults or {}).get(key)
+                    if old_default is None or existing[key] != old_default:
+                        prefix = "export " if stripped.startswith("export ") else ""
+                        rendered.append(f"{prefix}{key}={existing[key]}")
+                        continue
+                    if key not in template_values:
+                        raise LocalAIError(f"Missing new default for {key}")
         rendered.append(raw_line)
     extras = sorted(set(existing) - seen)
     if extras:
@@ -146,6 +157,7 @@ def install_env_from_template(
     force_edit: bool,
     accept_defaults: bool,
     drop_keys: set[str] | None = None,
+    previous_defaults: dict[str, str] | None = None,
 ) -> None:
     if not template.is_file():
         raise LocalAIError(f"Missing configuration template: {template}")
@@ -182,7 +194,12 @@ def install_env_from_template(
         console.print(f"[yellow]Refreshing {label}[/yellow] ({'; '.join(reasons)})")
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    staged_text = render_template_with_existing(template, destination, drop_keys=drop_keys)
+    staged_text = render_template_with_existing(
+        template,
+        destination,
+        drop_keys=drop_keys,
+        previous_defaults=previous_defaults if version_mismatch else None,
+    )
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{destination.name}.staging-", dir=destination.parent, text=True
     )
@@ -352,10 +369,17 @@ def model_revision_matches(model: dict[str, Any], env: dict[str, str]) -> bool:
         return False
 
 
+def model_file_available(model: dict[str, Any], env: dict[str, str], rel: str) -> bool:
+    if (model_destination(model, env) / rel).is_file():
+        return True
+    alternate = model.get("alternate_files", {}).get(rel)
+    return bool(alternate and Path(resolve(str(alternate), env)).is_file())
+
+
 def model_complete(model: dict[str, Any], env: dict[str, str]) -> bool:
     root = model_destination(model, env)
     for rel in model.get("check_files", []):
-        if not (root / str(rel)).is_file():
+        if not model_file_available(model, env, str(rel)):
             return False
     for rel in model.get("check_dirs", []):
         if not (root / str(rel)).is_dir():
@@ -372,8 +396,12 @@ def model_missing(model: dict[str, Any], env: dict[str, str]) -> list[str]:
     missing: list[str] = []
     for rel in model.get("check_files", []):
         path = root / str(rel)
-        if not path.is_file():
-            missing.append(str(path))
+        if not model_file_available(model, env, str(rel)):
+            alternate = model.get("alternate_files", {}).get(str(rel))
+            if alternate:
+                missing.append(f"{path} (or {resolve(str(alternate), env)})")
+            else:
+                missing.append(str(path))
     for rel in model.get("check_dirs", []):
         path = root / str(rel)
         if not path.is_dir():
@@ -548,6 +576,11 @@ def download_huggingface(model: dict[str, Any], service_dir: Path, env: dict[str
         args.extend(["--revision", resolve(str(revision), env)])
     include = [str(x) for x in model.get("include", [])]
     for pattern in include:
+        # Some model families share byte-identical files. When an existing
+        # registered model path provides one, do not download a second copy.
+        alternate = model.get("alternate_files", {}).get(pattern)
+        if alternate and Path(resolve(str(alternate), env)).is_file():
+            continue
         # ``hf download --include`` accepts one pattern per option. Passing
         # multiple patterns after a single --include causes later values to be
         # parsed as positional filenames; the CLI then ignores --include and
@@ -681,6 +714,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
         force_edit=args.edit or args.edit_service,
         accept_defaults=args.accept_defaults,
         drop_keys=redundant_shared_keys,
+        previous_defaults={
+            str(key): str(value)
+            for key, value in manifest.get("config", {}).get("previous_defaults", {}).items()
+        },
     )
 
     env = effective_env(repo_root, service_dir, manifest)

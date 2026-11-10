@@ -105,7 +105,8 @@ Canonical externally downloaded model repositories stay separate:
 ```text
 /data/services/hf-repos/
 ├── Comfy-Org/
-│   └── MiniMax-H3/          # optional ComfyUI bundle
+│   ├── MiniMax-H3/          # optional video bundle; shared text encoder
+│   └── MiniMax-H3-Image/    # optional image generation/editing bundle
 ├── Serveurperso/
 │   └── Qwen3-TTS-GGUF/      # qwentts talker + codec GGUFs
 └── VAST-AI/
@@ -131,18 +132,23 @@ cd services/triposplat
 
 There is no separate download-before-setup step.
 
-ComfyUI itself has no required model bundle. Optional bundles are selected in
-`services/comfyui/.env`:
+ComfyUI itself has no required model bundle. The current recipe pins
+ComfyUI v0.45.0 for native MiniMax H3 Image support. Optional bundles are
+selected in `services/comfyui/.env`:
 
 ```dotenv
-COMFYUI_MODEL_BUNDLES=minimax-h3
+COMFYUI_MODEL_BUNDLES=minimax-h3-image
 ```
 
 or for one setup invocation:
 
 ```bash
-./setup.sh --with-model minimax-h3
+./setup.sh --with-model minimax-h3-image
 ```
+
+`minimax-h3` remains available for video. Both may be selected together, and
+the image bundle reuses the H3 video Qwen3-VL encoder if it is already present.
+See `services/comfyui/docs/minimax-h3-image.md` for files and workflows.
 
 TTS defaults to the qwentts 0.6B Q8 bundle and can additionally provision the
 1.7B talker:
@@ -158,6 +164,7 @@ invent configuration:
 ```bash
 services/triposplat/scripts/download_weights.sh
 services/comfyui/scripts/download_minimax_h3_comfy.sh
+services/comfyui/scripts/download_minimax_h3_image_comfy.sh
 ```
 
 If `.env` has not been initialized, they tell you to run `./setup.sh` first.

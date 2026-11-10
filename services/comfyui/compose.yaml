@@ -6,8 +6,8 @@ services:
       dockerfile: Dockerfile
       args:
         BASE_COMFYUI_IMAGE: ${BASE_COMFYUI_IMAGE:-ghcr.io/lecode-official/comfyui-docker:latest}
-        COMFYUI_REF: ${COMFYUI_REF:-v0.31.0}
-    image: ${COMFYUI_IMAGE:-local/comfyui:v0.31.0}
+        COMFYUI_REF: ${COMFYUI_REF:-v0.45.0}
+    image: ${COMFYUI_IMAGE:-local/comfyui:v0.45.0}
     pull_policy: never
     restart: unless-stopped
 
