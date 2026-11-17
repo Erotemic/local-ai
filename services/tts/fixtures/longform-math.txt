@@ -1,0 +1,5 @@
+A symmetric matrix has real eigenvalues and an orthonormal basis of eigenvectors. This allows us to describe a selected spectral subspace using an orthogonal projection. When we perturb the matrix, the eigenvectors may rotate, even if the corresponding eigenvalues move only a little.
+
+Consider two invariant subspaces whose associated spectral values are separated by a positive gap. The Davis Kahan estimate controls the angle between those subspaces in terms of a residual and the size of that gap. A larger gap means that the same residual permits less rotation. This geometric interpretation makes the bound useful in numerical linear algebra.
+
+There is a qualification. The statement depends on the exact separation assumption, the norm under consideration, and how we identify the two subspaces. These hypotheses remain important even when the formula itself looks simple. A careful narration should explain the hypotheses before using the estimate in an example.

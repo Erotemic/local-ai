@@ -58,5 +58,8 @@ PY
 ENV PYTHONPATH="/opt/breeze-tts:${PYTHONPATH}"
 
 COPY services/tts/scripts/candidate_server.py /opt/local-ai/candidate_server.py
+COPY services/tts/scripts/passage_planner.py /opt/local-ai/passage_planner.py
+COPY services/tts/scripts/longform_speech.py /opt/local-ai/longform_speech.py
+COPY services/tts/scripts/speech_jobs.py /opt/local-ai/speech_jobs.py
 WORKDIR /opt/local-ai
 ENTRYPOINT ["python", "/opt/local-ai/candidate_server.py"]
