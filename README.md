@@ -2,6 +2,9 @@
 
 Version-controlled recipes for local generative-AI services.
 
+For read-only diagnostics of a host's aivm/LiteLLM/pi connection, see the
+[pi host doctor](harnesses/pi/README.md).
+
 This repository is a collection of independently runnable local services, not an
 inference orchestration framework. Each service owns its Docker image, Compose
 configuration, model requirements, state, and lifecycle. A small shared Python
