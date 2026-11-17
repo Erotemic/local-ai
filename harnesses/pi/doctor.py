@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit, urlunsplit
 
 from guest_probe import models, safe_url
@@ -104,15 +105,17 @@ def query_stack(args, report):
     return url, key
 
 
+def host_local_url(url):
+    hostname = urlsplit(url).hostname
+    try:
+        return ipaddress.ip_address(hostname).is_loopback or ipaddress.ip_address(hostname).is_unspecified
+    except ValueError:
+        return hostname == 'localhost'
+
+
 def desired_url(url, gateway):
     parsed = urlsplit(url)
-    hostname = parsed.hostname
-    try:
-        local = ipaddress.ip_address(hostname).is_loopback or ipaddress.ip_address(hostname).is_unspecified
-    except ValueError:
-        local = hostname == 'localhost'
-    if local:
-        hostname = gateway
+    hostname = gateway if host_local_url(url) else parsed.hostname
     if not hostname:
         raise ValueError('no VM gateway address')
     host = '[' + hostname + ']' if ':' in hostname else hostname
@@ -123,6 +126,54 @@ def desired_url(url, gateway):
     return urlunsplit((parsed.scheme, netloc, path, '', ''))
 
 
+def query_live_network(args, vm, report):
+    """Inspect system libvirt without applying policy or requesting sudo."""
+    prefix = ['virsh', '--readonly', '-c', 'qemu:///system']
+    name = vm['network']['name']
+    code, info = run(prefix + ['net-info', name], args.timeout)
+    if code or not any(line.split(':', 1)[0].strip() == 'Active' and line.split(':', 1)[1].strip() == 'yes'
+                       for line in info.splitlines() if ':' in line):
+        report['notes'].append('Live libvirt network unavailable or inactive; no sudo or network activation attempted.')
+        return None
+    code, output = run(prefix + ['net-dumpxml', name], args.timeout)
+    if code:
+        report['notes'].append('Live libvirt network XML unavailable.')
+        return None
+    try:
+        root = ET.fromstring(output)
+        ipv4 = next(node for node in root.findall('ip') if node.get('family', 'ipv4') == 'ipv4')
+        gateway = str(ipaddress.IPv4Address(ipv4.attrib['address']))
+        subnet = str(ipaddress.IPv4Network((gateway, ipv4.get('prefix') or ipv4.attrib['netmask']), strict=False))
+        bridge_node = root.find('bridge')
+        result = {'name': name, 'gateway_ip': gateway, 'subnet_cidr': subnet,
+                  'bridge': bridge_node.get('name') if bridge_node is not None else None}
+    except (ET.ParseError, StopIteration, ValueError, KeyError):
+        report['warnings'].append('Cannot parse live libvirt network IPv4 configuration.')
+        return None
+    report['live_network'] = result
+    return result
+
+
+def check_network_drift(vm, live, report):
+    drift = []
+    configured = vm['network']
+    if live:
+        for field in ('gateway_ip', 'subnet_cidr', 'bridge'):
+            if live.get(field) != configured.get(field):
+                drift.append('Configured ' + field + '=' + str(configured.get(field)) + '; live libvirt=' + str(live.get(field)))
+    cached = vm.get('cached_ip')
+    if cached:
+        try:
+            if ipaddress.ip_address(cached) not in ipaddress.ip_network(configured['subnet_cidr'], strict=False):
+                drift.append('Cached VM address ' + cached + ' is outside configured subnet ' + configured['subnet_cidr'])
+        except (ValueError, KeyError):
+            drift.append('Cannot validate cached VM address against configured subnet')
+    report['network_drift'] = drift
+    if drift:
+        report['warnings'].append('VM network configuration may be stale; endpoint/firewall changes are withheld pending reconciliation.')
+    return not drift
+
+
 def inspect_network(args, vm, url, report):
     parsed = urlsplit(url)
     port = parsed.port or (443 if parsed.scheme == 'https' else 80)
@@ -131,12 +182,13 @@ def inspect_network(args, vm, url, report):
     present = endpoint in firewall.get('allow_tcp_endpoints', [])
     report['connection'] = {'provider_url': url, 'endpoint': endpoint,
                             'endpoint_exception_present': present,
-                            'firewall_enabled': firewall['enabled']}
-    if not present:
+                            'firewall_enabled': firewall['enabled'],
+                            'preview_safe': not report.get('network_drift')}
+    if not present and report['connection']['preview_safe']:
         report['proposed_changes'].append('Add ' + endpoint + ' to network ' + vm['network']['name'] + ' firewall.allow_tcp_endpoints (preserve other entries).')
     if not firewall['enabled']:
         report['notes'].append('aivm firewall is disabled; preserve that setting. Endpoint exceptions are currently inactive.')
-    if port in firewall.get('allow_tcp_ports', []):
+    if str(port) in {str(value) for value in firewall.get('allow_tcp_ports', [])}:
         report['notes'].append('A broad TCP port exception already covers this port; preserve it, but prefer a precise endpoint for setup.')
     report['notes'].append('Firewall configuration is desired state; live nftables enforcement is not inspected.')
     code, output = run(['ss', '-H', '-ltn', f'sport = :{port}'], args.timeout)
@@ -192,6 +244,17 @@ def inspect_pi(args, vm, url, key, report):
         report['warnings'].append('Guest pi inspection failed: ' + guest.get('error', 'SSH failure'))
         return
     report['pi'] = guest
+    connection = report.get('connection', {})
+    routes = guest.get('default_routes')
+    if routes and report.get('connection_gateway'):
+        best = [route['gateway'] for route in routes if route['metric'] == routes[0]['metric']]
+        if report['connection_gateway'] not in best:
+            report.setdefault('network_drift', []).append('Guest default gateway(s) ' + ', '.join(best) + ' differ from selected host gateway ' + report['connection_gateway'])
+            report['warnings'].append('Guest routing disagrees with the selected network; endpoint/firewall changes are withheld.')
+            connection['preview_safe'] = False
+            # Policy preview was derived before the guest routing probe.
+            report['proposed_changes'] = [change for change in report['proposed_changes']
+                                          if not change.startswith('Add ' + connection.get('endpoint', '') + ' to network ')]
     changes = report['proposed_changes']
     if not guest['pi_path']:
         changes.append('Provision pi through aivm before applying personal settings.')
@@ -203,9 +266,9 @@ def inspect_pi(args, vm, url, key, report):
     provider = args.provider or guest['provider']
     if guest['defaultProvider'] != provider:
         changes.append('Select default pi provider ' + provider + '.')
-    if url and guest['baseUrl'] != url:
+    if url and connection.get('preview_safe', False) and guest['baseUrl'] != url:
         changes.append('Set pi provider URL to ' + url + ' (direct host endpoint).')
-    if url and url.startswith('http:') and not guest['allowInsecureHttp']:
+    if url and connection.get('preview_safe', False) and url.startswith('http:') and not guest['allowInsecureHttp']:
         changes.append('Enable allowInsecureHttp for this explicit non-loopback HTTP provider.')
     if guest['credential_matches'] is False:
         changes.append('Synchronize guest credential from infer-stack (values redacted).')
@@ -224,6 +287,8 @@ def inspect_pi(args, vm, url, key, report):
         report['warnings'].append('No default model selected; pass --model to preview a choice.')
     elif model not in probe['models']:
         report['warnings'].append('Selected model is absent from gateway model discovery: ' + model)
+    if guest.get('current_endpoint', {}).get('status') == 'ok':
+        report['notes'].append('The currently configured pi endpoint passed authenticated model discovery using the guest credential.')
 
 
 def main():
@@ -247,7 +312,14 @@ def main():
     desired = None
     if vm and url:
         try:
-            desired = desired_url(url, vm['network'].get('gateway_ip'))
+            live = query_live_network(args, vm, report)
+            check_network_drift(vm, live, report)
+            gateway = (live or vm['network']).get('gateway_ip')
+            desired = desired_url(url, gateway)
+            # A pinned remote URL does not depend on the local bridge gateway.
+            if host_local_url(url):
+                report['connection_gateway'] = gateway
+            report['endpoint_source'] = 'live libvirt network' if live else 'configured network (not verified live)'
             inspect_network(args, vm, desired, report)
         except ValueError:
             report['warnings'].append('Cannot derive guest endpoint from gateway configuration.')
@@ -261,7 +333,7 @@ def main():
         print(json.dumps(report, indent=2))
     else:
         print('Pi host doctor — read only; no configuration changes or generation requests')
-        for name in ('aivm_executable', 'infer_stack_executable', 'aivm', 'infer_stack', 'connection', 'listeners', 'ssh_target', 'ssh_address_source', 'host_gateway', 'pi'):
+        for name in ('aivm_executable', 'infer_stack_executable', 'aivm', 'infer_stack', 'live_network', 'network_drift', 'endpoint_source', 'connection', 'listeners', 'ssh_target', 'ssh_address_source', 'host_gateway', 'pi'):
             if name in report:
                 print('\n' + name + ':')
                 print(json.dumps(report[name], indent=2))

@@ -30,6 +30,8 @@ It reports:
   authenticated host model discovery.
 - The direct guest endpoint and whether its precise firewall exception exists.
 - Visible host TCP listeners and authenticated model discovery from the guest.
+- The active libvirt network XML and the guest's default IPv4 routes, compared
+  against configured network values and the cached VM address.
 - Pi settings, extension declarations, selected model, and whether the guest
   credential matches infer-stack's current key.
 - Proposed changes to endpoint exceptions, pi preferences, extensions, model,
@@ -73,8 +75,19 @@ comparison is reported as unavailable. Noninteractive guest environment
 references may also be unavailable. Extension declarations are inspected;
 extension runtime compatibility is not yet verified.
 
-Firewall config is reported as desired state; live nftables rules and libvirt
-network XML are not inspected. Docker can publish ports through NAT without a
+Firewall config is reported as desired state; live nftables rules are not
+inspected. Active network XML is queried with `virsh --readonly` against
+`qemu:///system`; no sudo or network activation is attempted. If available,
+the live gateway is used for the candidate endpoint. Otherwise the configured
+gateway remains an unverified candidate. Config/live network drift, a cached IP
+outside the configured subnet, or a conflicting guest default route suppresses
+endpoint and firewall change proposals until reconciled. Other pi preference
+changes can still be previewed. Guest default routes come from `/proc/net/route`.
+The currently configured pi endpoint is also checked using its own resolved
+guest credential; the host credential is used only for the derived endpoint.
+Network errors include a sanitized reason such as `ECONNREFUSED` or timeout.
+
+Docker can publish ports through NAT without a
 visible host listener, so `ss` alone does not establish reachability. The guest
 probe tests the proposed direct endpoint with infer-stack's key independently
 of existing pi settings, allowing network failures and settings drift to be
