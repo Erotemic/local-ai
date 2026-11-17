@@ -86,6 +86,16 @@ versions from the working VM. It preserves unrelated packages and package
 resource filters while pinning these two declarations. Installation happens in
 personal scope, never with `-l`. Package commands run outside any project directory.
 
+Setup resolves aivm's user-local Node installations under
+`~/.local/share/aivm/node/node-v*-linux-*/bin` (and the `AIVM_NODE_ROOT` /
+`AIVM_PI_NODE_BIN_DIR` overrides) without requiring a login shell or sourcing
+shell startup files. Supported runtimes for the current architecture are ordered
+by version. This lets pi's `env node` launcher and npm find the same toolchain
+aivm used during provisioning. Setup does not install a missing Node runtime.
+Launcher failures report the exact command, exit status, classified loader error,
+and discovered Node/npm paths and Node version. Raw process output remains omitted
+so errors cannot print credentials from settings or environment variables.
+
 Before any upgrade/install/settings changes, setup saves a private mode-0600
 `settings.json.before-local-ai-*` backup in the guest agent directory. Settings
 merges preserve credentials, other providers, and unrelated settings. The final

@@ -3,9 +3,11 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
+import shlex
 import sys
 import tempfile
 import unittest
@@ -120,6 +122,44 @@ class PiSetupTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout)['status'], 'ok')
             self.assertEqual(json.loads(path.read_text())['defaultThinkingLevel'], 'medium')
             self.assertNotIn('TEST-SECRET', result.stdout + result.stderr)
+
+    def test_aivm_managed_node_works_without_login_shell_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path, payload = self.fixture(root)
+            arch = {'x86_64': 'x64', 'aarch64': 'arm64', 'armv7l': 'armv7l', 'ppc64le': 'ppc64le', 's390x': 's390x'}[guest_setup.platform.machine()]
+            node_dir = root / '.local/share/aivm/node' / ('node-v22.19.0-linux-' + arch) / 'bin'
+            node_dir.mkdir(parents=True)
+            node = node_dir / 'node'
+            node.write_text('#!/bin/sh\nif [ "$1" = --version ]; then echo v22.19.0; else exec ' + shlex.quote(sys.executable) + ' "$@"; fi\n')
+            node.chmod(0o700)
+            pi = root / 'pi'
+            pi.write_text('#!/usr/bin/env node\nprint("1.4.0")\n')
+            pi.chmod(0o700)
+            payload['pi_path'] = str(pi)
+            with patch.dict(os.environ, {'PATH': '/usr/bin:/bin', 'AIVM_NODE_ROOT': str(node_dir.parent.parent), 'AIVM_PI_NODE_BIN_DIR': ''}), patch.object(guest_setup.Path, 'home', return_value=root):
+                environment = guest_setup.runtime_environment(str(pi))
+                self.assertEqual(guest_setup.shutil.which('node', path=environment['PATH']), str(node))
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'ok', result)
+            self.assertEqual(json.loads(path.read_text())['defaultThinkingLevel'], 'medium')
+
+    def test_launcher_failure_reports_runtime_without_leaking_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            pi = Path(tmp) / 'pi'
+            pi.write_text('#!/bin/sh\necho "TEST-SECRET ERR_MODULE_NOT_FOUND" >&2\nexit 42\n')
+            pi.chmod(0o700)
+            payload['pi_path'] = str(pi)
+            before = path.read_bytes()
+            result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(result['command_diagnostics']['exit_code'], 42)
+            self.assertEqual(result['command_diagnostics']['reason'], 'ERR_MODULE_NOT_FOUND')
+            self.assertIn(str(pi), result['command_diagnostics']['command'])
+            self.assertNotIn('TEST-SECRET', json.dumps(result))
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(path.parent.glob('settings.json.before-*')), [])
 
     def test_host_does_not_apply_without_verified_connectivity(self):
         report = {'pi': {}, 'proposed_changes': [], 'warnings': []}
