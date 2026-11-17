@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from urllib.parse import urlsplit
 
 from preferences import merge, MIN_PI_VERSION, PACKAGE_VERSIONS
 
@@ -78,6 +79,13 @@ def atomic_write(path, content):
             os.unlink(temporary)
 
 
+def backup(path, content):
+    fd, name = tempfile.mkstemp(prefix=path.name + '.before-local-ai-', dir=path.parent)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(content)
+    return name
+
+
 def execute(pi, arguments, timeout, environment):
     try:
         result = subprocess.run([pi] + arguments, cwd='/', env=environment,
@@ -109,6 +117,27 @@ def _apply(payload):
     initial = json.loads(original)
     if not isinstance(initial, dict):
         raise RuntimeError('Pi settings must be a JSON object.')
+    connection = payload.get('connection')
+    auth_path = path.parent / 'auth.json'
+    auth_original, auth_updated = None, None
+    if connection:
+        parsed = urlsplit(connection['url'])
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise RuntimeError('Invalid direct provider URL; no changes made.')
+        if auth_path.is_symlink() or (auth_path.exists() and not auth_path.is_file()):
+            raise RuntimeError('Expected a regular pi auth file; no changes made.')
+        auth_original = auth_path.read_bytes() if auth_path.exists() else b''
+        if hashlib.sha256(auth_original).hexdigest() != payload.get('auth_revision'):
+            raise RuntimeError('Pi auth changed since preflight; rerun setup with pi closed.')
+        auth = json.loads(auth_original) if auth_original else {}
+        if not isinstance(auth, dict):
+            raise RuntimeError('Pi auth must be a JSON object.')
+        entry = auth.get(connection['provider'], {})
+        env = entry.get('env', {})
+        # auth.json's endpoint takes precedence over provider settings. Update
+        # an existing override too, preserving its credential and other fields.
+        if 'LITELLM_BASE_URL' in env and env['LITELLM_BASE_URL'] != connection['url']:
+            auth_updated = merge(auth, {connection['provider']: {'env': {'LITELLM_BASE_URL': connection['url']}}})
     pi = payload['pi_path']
     environment = runtime_environment(pi)
     version_output = execute(pi, ['--version'], 30, environment)
@@ -118,11 +147,11 @@ def _apply(payload):
     version = tuple(map(int, match.groups()))
     if version < MIN_PI_VERSION and not payload['upgrade_pi']:
         raise RuntimeError('This recipe requires pi >=1.4.0; allow setup to upgrade pi.')
-    fd, backup_name = tempfile.mkstemp(prefix='settings.json.before-local-ai-', dir=path.parent)
-    with os.fdopen(fd, 'wb') as stream:
-        stream.write(original)
+    backup_name = backup(path, original)
     result = {'backup': backup_name, 'settings_path': str(path), 'packages': PACKAGE_VERSIONS}
     try:
+        if auth_updated is not None:
+            result['auth_backup'] = backup(auth_path, auth_original)
         if version < MIN_PI_VERSION:
             execute(pi, ['update'], payload['install_timeout'], environment)
             current = execute(pi, ['--version'], 30, environment)
@@ -147,6 +176,11 @@ def _apply(payload):
         before_merge = path.read_bytes()
         settings = json.loads(before_merge)
         updated = merge(settings, payload['preferences'])
+        if connection:
+            provider_settings = {'baseUrl': connection['url']}
+            if connection['url'].startswith('http:'):
+                provider_settings['allowInsecureHttp'] = True
+            updated = merge(updated, {'litellm': {'providers': {connection['provider']: provider_settings}}})
         # Replace only the two recipe package declarations; retain resource
         # filters on package objects and every unrelated package/provider.
         packages, seen = [], set()
@@ -166,8 +200,15 @@ def _apply(payload):
         updated['packages'] = packages
         if path.read_bytes() != before_merge:
             raise RuntimeError('Pi settings changed during setup; refusing to overwrite concurrent edits.')
+        if connection and (auth_path.read_bytes() if auth_path.exists() else b'') != auth_original:
+            raise RuntimeError('Pi auth changed during setup; refusing to overwrite concurrent edits.')
         if updated != settings:
             atomic_write(path, (json.dumps(updated, indent=2) + '\n').encode())
+        if auth_updated is not None:
+            atomic_write(auth_path, (json.dumps(auth_updated, indent=2) + '\n').encode())
+        if connection:
+            result['provider_url'] = connection['url']
+            result['provider'] = connection['provider']
         result['status'] = 'ok'
     except Exception as exc:
         # Package installation may already have changed settings/cache. Keep

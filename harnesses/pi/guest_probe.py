@@ -110,9 +110,11 @@ def default_routes(path=Path('/proc/net/route')):
 def inspect_guest(payload):
     root = Path(os.environ.get('PI_CODING_AGENT_DIR') or Path.home() / '.pi/agent')
     settings_path = root / 'settings.json'
-    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    settings_bytes = settings_path.read_bytes() if settings_path.exists() else b''
+    settings = json.loads(settings_bytes) if settings_bytes else {}
     auth_path = root / 'auth.json'
-    auth = json.loads(auth_path.read_text()) if auth_path.exists() else {}
+    auth_bytes = auth_path.read_bytes() if auth_path.exists() else b''
+    auth = json.loads(auth_bytes) if auth_bytes else {}
     providers = settings.get('litellm', {}).get('providers', {})
     provider = payload.get('provider')
     if not provider:
@@ -148,7 +150,8 @@ def inspect_guest(payload):
                 for name, value in template.items()}
     result = {
         'settings_path': str(settings_path), 'settings_exists': settings_path.exists(),
-        'settings_revision': hashlib.sha256(settings_path.read_bytes() if settings_path.exists() else b'').hexdigest(),
+        'settings_revision': hashlib.sha256(settings_bytes).hexdigest(),
+        'auth_revision': hashlib.sha256(auth_bytes).hexdigest(),
         'pi_path': shutil.which('pi') or (str(root / 'bin/pi') if (root / 'bin/pi').exists() else None),
         'theme': settings.get('theme'), 'defaultProvider': settings.get('defaultProvider'),
         'defaultModel': settings.get('defaultModel'), 'provider': provider,

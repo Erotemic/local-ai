@@ -65,9 +65,13 @@ the updated preferences on exit. Run these commands on the host:
 Setup uses the existing default/sole VM and selected LiteLLM alias, such as
 `litellm-namek`. It sends its code and preferences over SSH, with no checkout or
 helper installation in the guest. This first setup step requires an already
-working provider URL and credential matching infer-stack, a discoverable model,
-and consistent network data. It does not apply firewall changes or rewrite
-endpoint/credential files. Missing reasoning metadata does not block upgrades,
+direct endpoint reachable from the guest, a credential matching infer-stack,
+a discoverable model, and consistent network data. It sets the selected pi
+provider URL to the verified direct endpoint. If `auth.json` contains a
+`LITELLM_BASE_URL` override for that provider, setup updates that URL too, because
+it takes precedence over provider settings. Credential values, other providers,
+headers, and other auth environment entries are preserved. Setup does not apply
+firewall changes or synchronize mismatched credentials. Missing reasoning metadata does not block upgrades,
 retry/compaction settings, or saving the requested local effort preference.
 The setup result reports `effort.metadata_verified` separately from successful
 settings application and retains the doctor's warnings. Pi may hide or clamp
@@ -102,6 +106,16 @@ merges preserve credentials, other providers, and unrelated settings. The final
 settings write is atomic and mode 0600. Failures keep the backup and report its
 path; package caches/installations may have changed and are not rolled back.
 Concurrent edits detected before the final write are not overwritten.
+When updating an auth URL override, it also saves a private
+`auth.json.before-local-ai-*` backup before any upgrade/install/settings changes.
+Both file revisions are checked against preflight. Writes are atomic per file;
+if a later write fails, earlier writes may have completed and the backups remain.
+
+For a VM previously using socat, run setup on its host, then rerun the doctor.
+Pi's reported `baseUrl` should be the bridge endpoint (for example
+`http://10.77.0.1:14042`), with both endpoint probes succeeding. The guest's
+requests then go directly to the host; setup does not terminate existing socat
+processes or modify unrelated tunnel services.
 
 Medium effort is written as pi's startup default and as the selected model's
 entry in both pi's `modelThinkingLevels` and pi-effort's remembered `modelEffort`

@@ -43,14 +43,16 @@ def main():
         reasons.append('VM/pi discovery must succeed without network drift.')
     if guest.get('desired_endpoint', {}).get('status') != 'ok' or model not in guest.get('desired_endpoint', {}).get('models', []):
         reasons.append('The selected model must be discoverable from the guest.')
-    if guest.get('credential_matches') is not True or guest.get('baseUrl') != connection.get('provider_url'):
-        reasons.append('This setup step requires the existing guest endpoint and credential to match infer-stack; connection changes are not applied here.')
+    if guest.get('credential_matches') is not True:
+        reasons.append('The existing guest credential must match infer-stack; credential synchronization is not applied here.')
     if reasons:
         print(json.dumps({'status': 'blocked', 'reasons': reasons, 'doctor': report}, indent=2))
         return 1
     payload = {name: guest[name] for name in ('settings_path', 'settings_revision', 'pi_path')}
     payload.update(preferences=report['desired_preferences'], upgrade_pi=not args.no_upgrade_pi,
-                   install_timeout=args.install_timeout)
+                   install_timeout=args.install_timeout,
+                   connection={'provider': guest['provider'], 'url': connection['provider_url']},
+                   auth_revision=guest['auth_revision'])
     # Ship code through SSH; no checkout or helper installation in the VM.
     argv = doctor.ssh_argv(args, report['aivm'], report) + ['python3 -B -c ' + shlex.quote(remote_source())]
     code, output = doctor.run(argv, args.install_timeout * 3 + 90, json.dumps(payload))

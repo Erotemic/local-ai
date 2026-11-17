@@ -76,6 +76,59 @@ class PiSetupTests(unittest.TestCase):
             self.assertEqual(path.read_text(), '{"concurrent": true}')
             self.assertEqual(list(path.parent.glob('settings.json.before-*')), [])
 
+    def test_direct_endpoint_updates_auth_override_and_preserves_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path, payload = self.fixture(root)
+            settings = json.loads(path.read_text())
+            settings['litellm']['providers']['litellm-namek']['baseUrl'] = 'http://0.0.0.0:14042'
+            path.write_text(json.dumps(settings))
+            auth_path = root / 'auth.json'
+            auth_path.write_text(json.dumps({'litellm-namek': {'type': 'api_key', 'key': 'TEST-SECRET', 'env': {'LITELLM_BASE_URL': 'http://0.0.0.0:14042', 'KEEP': 'yes'}}, 'other': {'key': 'OTHER-SECRET'}}))
+            original_auth = auth_path.read_bytes()
+            payload.update(connection={'provider': 'litellm-namek', 'url': 'http://10.77.0.1:14042'},
+                           settings_revision=hashlib.sha256(path.read_bytes()).hexdigest(),
+                           auth_revision=hashlib.sha256(original_auth).hexdigest())
+            with patch.object(guest_setup, 'execute', return_value='1.4.0\n'):
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'ok', result)
+            updated = json.loads(path.read_text())
+            self.assertEqual(updated['litellm']['providers']['litellm-namek']['baseUrl'], 'http://10.77.0.1:14042')
+            self.assertEqual(updated['litellm']['providers']['litellm-namek']['apiKey'], 'TEST-SECRET')
+            auth = json.loads(auth_path.read_text())
+            self.assertEqual(auth['litellm-namek']['env']['LITELLM_BASE_URL'], 'http://10.77.0.1:14042')
+            self.assertEqual(auth['litellm-namek']['env']['KEEP'], 'yes')
+            self.assertEqual(auth['litellm-namek']['key'], 'TEST-SECRET')
+            self.assertEqual(auth['other']['key'], 'OTHER-SECRET')
+            self.assertEqual(Path(result['auth_backup']).read_bytes(), original_auth)
+            self.assertEqual(stat.S_IMODE(auth_path.stat().st_mode), 0o600)
+            self.assertNotIn('SECRET', json.dumps(result))
+
+    def test_direct_endpoint_with_settings_credential_does_not_create_auth_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            payload.update(connection={'provider': 'litellm-namek', 'url': 'http://10.77.0.1:14042'},
+                           auth_revision=hashlib.sha256(b'').hexdigest())
+            with patch.object(guest_setup, 'execute', return_value='1.4.0\n'):
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'ok', result)
+            self.assertFalse((path.parent / 'auth.json').exists())
+
+    def test_auth_changed_since_preflight_blocks_direct_endpoint_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            auth_path = path.parent / 'auth.json'
+            auth_path.write_text('{"other": {"key": "NEW-SECRET"}}')
+            before = path.read_bytes()
+            payload.update(connection={'provider': 'litellm-namek', 'url': 'http://10.77.0.1:14042'},
+                           auth_revision=hashlib.sha256(b'').hexdigest())
+            with patch.object(guest_setup, 'execute') as command:
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'failed')
+            command.assert_not_called()
+            self.assertEqual(path.read_bytes(), before)
+            self.assertNotIn('NEW-SECRET', json.dumps(result))
+
     def test_package_failure_retains_backup_and_reports_no_secret(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, payload = self.fixture(Path(tmp))
@@ -172,8 +225,9 @@ class PiSetupTests(unittest.TestCase):
     def test_missing_effort_metadata_does_not_block_local_settings(self):
         report = {
             'pi': {'pi_path': '/guest/pi', 'settings_path': '/guest/settings.json', 'settings_revision': 'revision',
+                   'auth_revision': 'auth-revision', 'provider': 'litellm-namek',
                    'desired_endpoint': {'status': 'ok', 'models': ['model']},
-                   'baseUrl': 'http://10.77.0.1:14042', 'credential_matches': True},
+                   'baseUrl': 'http://0.0.0.0:14042', 'credential_matches': True},
             'connection': {'preview_safe': True, 'provider_url': 'http://10.77.0.1:14042'},
             'selected_model': 'model', 'aivm': {},
             'desired_preferences': desired_preferences(doctor.BASELINE, 'litellm-namek', 'model', 'medium'),
@@ -184,6 +238,7 @@ class PiSetupTests(unittest.TestCase):
         with patch.object(sys, 'argv', ['setup', '--model', 'model', '--effort', 'medium', '--json']), patch.object(doctor, 'collect', return_value=(report, None, None)), patch.object(doctor, 'ssh_argv', return_value=['ssh', 'vm']), patch.object(doctor, 'run', return_value=(0, '{"status":"ok"}')) as command, contextlib.redirect_stdout(output):
             self.assertEqual(pi_setup.main(), 0)
         payload = json.loads(command.call_args.args[2])
+        self.assertEqual(payload['connection'], {'provider': 'litellm-namek', 'url': 'http://10.77.0.1:14042'})
         self.assertEqual(payload['preferences']['retry']['maxRetries'], 5)
         self.assertTrue(payload['preferences']['compaction']['enabled'])
         self.assertEqual(payload['preferences']['defaultThinkingLevel'], 'medium')
