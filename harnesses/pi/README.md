@@ -86,7 +86,8 @@ Setup checks `pi --version` and runs `pi update` if below the recipe-tested
 baseline of 1.4.0. `--no-upgrade-pi` makes that condition an error instead. This
 baseline is a reproducible recipe choice rather than an upstream minimum-version
 claim. It installs `pi-provider-litellm@4.4.2`, `pi-effort@0.1.1`, and
-`pi-subagents@0.89.0`, `context-mode@1.0.169`, and `pi-web-access@0.48.0`.
+`pi-subagents@0.89.0`, `context-mode@1.0.169`, `pi-web-access@0.48.0`, and
+`pi-goal-list-loop-audit@0.40.1`.
 It preserves unrelated packages and package
 resource filters while pinning these declarations. Installation happens in
 personal scope, never with `-l`. Package commands run outside any project directory.
@@ -127,6 +128,19 @@ default search may contact external providers; a self-hosted SearXNG URL or
 explicit provider selection can be configured separately in
 `~/.pi/agent/web-search.json`. No search or fetch is run by setup or the doctor.
 See the [web-access documentation](https://github.com/nicobailon/pi-web-access).
+
+Goal/List/Loop/Audit supplies goal tracking, continuation, and completion audits.
+After setup, start a fresh pi session and use `/glla version` or `/glla status`
+to inspect it. Use `/goal plan <outcome>` to draft a goal and its acceptance
+criteria. The recipe only installs/registers the extension: it never creates a
+goal, starts a loop, or replaces existing GLLA settings. Its optional structured
+question companion is not installed; the plugin supports plain-text fallback.
+The pinned release supports Node >=22.19 and Pi >=0.84.2 <2.0.0. Its detached
+auditor mirrors session extension packages by default (excluding GLLA itself),
+so LiteLLM can remain available; existing auditor/model policy is preserved.
+Keep GLLA's goal/list/loop supervisor as the continuation owner for that work
+rather than starting another goal driver alongside it. See the
+[goal plugin documentation](https://github.com/DraconDev/pi-goal-list-loop-audit).
 
 Setup resolves aivm's user-local Node installations under
 `~/.local/share/aivm/node/node-v*-linux-*/bin` (and the `AIVM_NODE_ROOT` /

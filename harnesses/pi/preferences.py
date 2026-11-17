@@ -8,6 +8,7 @@ PACKAGE_VERSIONS = {
     # context-mode 2.x needs Node >=24.15; keep aivm's Node 22.19 supported.
     'context-mode': '1.0.169',
     'pi-web-access': '0.48.0',
+    'pi-goal-list-loop-audit': '0.40.1',
 }
 MIN_PI_VERSION = (1, 4, 0)  # Recipe-tested baseline, not a claim about upstream minimums.
 

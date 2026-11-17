@@ -55,6 +55,7 @@ class PiSetupTests(unittest.TestCase):
             self.assertIn('npm:pi-subagents@0.89.0', updated['packages'])
             self.assertIn('npm:context-mode@1.0.169', updated['packages'])
             self.assertIn('npm:pi-web-access@0.48.0', updated['packages'])
+            self.assertIn('npm:pi-goal-list-loop-audit@0.40.1', updated['packages'])
             self.assertEqual(updated['pi-effort']['modelEffort']['litellm-namek/model'], 'medium')
             self.assertTrue(updated['unrelated']['preserve'])
             self.assertEqual(updated['packages'][0]['extensions'], ['./src/index.ts'])
@@ -108,10 +109,10 @@ class PiSetupTests(unittest.TestCase):
             self.assertEqual(result['status'], 'ok', result)
             self.assertEqual(command.call_count, 2)
 
-    def test_context_and_web_plugins_are_installed_at_pinned_versions(self):
+    def test_context_web_and_goal_plugins_are_installed_at_pinned_versions(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, payload = self.fixture(Path(tmp))
-            packages = ('context-mode', 'pi-web-access')
+            packages = ('context-mode', 'pi-web-access', 'pi-goal-list-loop-audit')
             for package in packages:
                 (path.parent / 'npm/node_modules' / package / 'package.json').unlink()
             installed = []
