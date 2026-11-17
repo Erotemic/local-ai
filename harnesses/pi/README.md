@@ -66,12 +66,17 @@ Setup uses the existing default/sole VM and selected LiteLLM alias, such as
 `litellm-namek`. It sends its code and preferences over SSH, with no checkout or
 helper installation in the guest. This first setup step requires an already
 working provider URL and credential matching infer-stack, a discoverable model,
-consistent network data, and model metadata declaring support for the requested
-effort. It does not apply firewall changes or rewrite endpoint/credential files.
+and consistent network data. It does not apply firewall changes or rewrite
+endpoint/credential files. Missing reasoning metadata does not block upgrades,
+retry/compaction settings, or saving the requested local effort preference.
+The setup result reports `effort.metadata_verified` separately from successful
+settings application and retains the doctor's warnings. Pi may hide or clamp
+the requested level until the provider discovers the required metadata.
+
 If effort metadata is missing, configure `reasoning_efforts: [low, medium,
 xhigh]` on the appropriate HyperQwen infer-stack endpoint and publish that change
-through infer-stack before retrying; model-list presence alone does not establish
-reasoning support.
+through infer-stack, then run `/litellm-refresh` in pi. Model-list presence and
+saved local preferences alone do not establish reasoning support.
 
 Setup checks `pi --version` and runs `pi update` if below the recipe-tested
 baseline of 1.4.0. `--no-upgrade-pi` makes that condition an error instead. This

@@ -349,8 +349,8 @@ def collect(args):
     if url and key and model:
         report['model_capabilities'] = capabilities(url, key, args.timeout, model)
         effort = args.effort or BASELINE['defaultThinkingLevel']
-        if effort not in report['model_capabilities']['reasoning_effort_levels']:
-            report['warnings'].append('Gateway metadata does not advertise requested effort ' + effort + '; setup will require explicit support.')
+        if effort not in report['model_capabilities']['reasoning_effort_levels'] or not report['model_capabilities'].get('supports_reasoning'):
+            report['warnings'].append('Gateway metadata does not confirm requested effort ' + effort + '. Setup can save the local preference, but pi may hide or clamp it until gateway reasoning metadata is corrected; runtime support is unverified.')
     return report, url, key
 
 

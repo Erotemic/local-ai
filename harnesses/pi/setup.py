@@ -45,8 +45,6 @@ def main():
         reasons.append('The selected model must be discoverable from the guest.')
     if guest.get('credential_matches') is not True or guest.get('baseUrl') != connection.get('provider_url'):
         reasons.append('This setup step requires the existing guest endpoint and credential to match infer-stack; connection changes are not applied here.')
-    if effort not in levels or not report.get('model_capabilities', {}).get('supports_reasoning'):
-        reasons.append('Gateway model metadata must advertise effort ' + effort + '; update the infer-stack endpoint capability declaration first.')
     if reasons:
         print(json.dumps({'status': 'blocked', 'reasons': reasons, 'doctor': report}, indent=2))
         return 1
@@ -61,11 +59,17 @@ def main():
     except ValueError:
         print('Guest setup failed or disconnected. Settings/package changes may be partial; inspect settings.json.before-local-ai-* in the guest agent directory.')
         return 1
+    result['effort'] = {
+        'requested': effort,
+        'metadata_verified': effort in levels and bool(report.get('model_capabilities', {}).get('supports_reasoning')),
+        'advertised_levels': levels,
+    }
+    result['warnings'] = report.get('warnings', [])
     print(json.dumps(result, indent=2))
     if code or result.get('status') != 'ok':
         return 1
     if not args.json:
-        print('Setup complete. Start a fresh pi session; run /litellm-refresh, then /effort to verify the advertised choices.')
+        print('Local pi preferences saved. Start a fresh pi session; run /litellm-refresh, then /effort to check available choices. Saved effort preferences do not establish runtime support.')
     return 0
 
 

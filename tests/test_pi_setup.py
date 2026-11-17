@@ -121,13 +121,36 @@ class PiSetupTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text())['defaultThinkingLevel'], 'medium')
             self.assertNotIn('TEST-SECRET', result.stdout + result.stderr)
 
-    def test_host_does_not_apply_without_verified_connectivity_or_effort(self):
+    def test_host_does_not_apply_without_verified_connectivity(self):
         report = {'pi': {}, 'proposed_changes': [], 'warnings': []}
         output = io.StringIO()
         with patch.object(sys, 'argv', ['setup', '--model', 'model']), patch.object(doctor, 'collect', return_value=(report, None, None)), patch.object(doctor, 'run') as command, contextlib.redirect_stdout(output):
             self.assertEqual(pi_setup.main(), 1)
         command.assert_not_called()
         self.assertEqual(json.loads(output.getvalue())['status'], 'blocked')
+
+    def test_missing_effort_metadata_does_not_block_local_settings(self):
+        report = {
+            'pi': {'pi_path': '/guest/pi', 'settings_path': '/guest/settings.json', 'settings_revision': 'revision',
+                   'desired_endpoint': {'status': 'ok', 'models': ['model']},
+                   'baseUrl': 'http://10.77.0.1:14042', 'credential_matches': True},
+            'connection': {'preview_safe': True, 'provider_url': 'http://10.77.0.1:14042'},
+            'selected_model': 'model', 'aivm': {},
+            'desired_preferences': desired_preferences(doctor.BASELINE, 'litellm-namek', 'model', 'medium'),
+            'model_capabilities': {'status': 'ok', 'reasoning_effort_levels': [], 'supports_reasoning': False},
+            'warnings': ['Runtime effort support is unverified.'],
+        }
+        output = io.StringIO()
+        with patch.object(sys, 'argv', ['setup', '--model', 'model', '--effort', 'medium', '--json']), patch.object(doctor, 'collect', return_value=(report, None, None)), patch.object(doctor, 'ssh_argv', return_value=['ssh', 'vm']), patch.object(doctor, 'run', return_value=(0, '{"status":"ok"}')) as command, contextlib.redirect_stdout(output):
+            self.assertEqual(pi_setup.main(), 0)
+        payload = json.loads(command.call_args.args[2])
+        self.assertEqual(payload['preferences']['retry']['maxRetries'], 5)
+        self.assertTrue(payload['preferences']['compaction']['enabled'])
+        self.assertEqual(payload['preferences']['defaultThinkingLevel'], 'medium')
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse(result['effort']['metadata_verified'])
+        self.assertEqual(result['warnings'], report['warnings'])
 
     def test_capability_metadata_limits_effort_to_advertised_levels(self):
         reply = {'status': 'ok', 'data': {'data': [{'model_name': 'model', 'model_info': {'supports_reasoning': True, 'reasoning_effort_levels': ['low', 'medium', 'xhigh']}}]}}
