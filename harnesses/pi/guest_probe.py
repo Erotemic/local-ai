@@ -189,7 +189,7 @@ def inspect_guest(payload):
                 break
         except (OSError, ValueError, KeyError):
             pass
-    for package in payload.get('package_names', ('pi-provider-litellm', 'pi-effort', 'pi-subagents')):
+    for package in payload.get('package_names', ('pi-provider-litellm', 'pi-effort', 'pi-subagents', 'context-mode', 'pi-web-access')):
         metadata = root / 'npm/node_modules' / package / 'package.json'
         try:
             result['package_versions'][package] = json.loads(metadata.read_text())['version']

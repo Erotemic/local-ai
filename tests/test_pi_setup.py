@@ -53,6 +53,8 @@ class PiSetupTests(unittest.TestCase):
             self.assertEqual(updated['defaultThinkingLevel'], 'medium')
             self.assertEqual(updated['subagents']['defaultThinking'], 'medium')
             self.assertIn('npm:pi-subagents@0.89.0', updated['packages'])
+            self.assertIn('npm:context-mode@1.0.169', updated['packages'])
+            self.assertIn('npm:pi-web-access@0.48.0', updated['packages'])
             self.assertEqual(updated['pi-effort']['modelEffort']['litellm-namek/model'], 'medium')
             self.assertTrue(updated['unrelated']['preserve'])
             self.assertEqual(updated['packages'][0]['extensions'], ['./src/index.ts'])
@@ -105,6 +107,28 @@ class PiSetupTests(unittest.TestCase):
                 result = guest_setup.apply(payload)
             self.assertEqual(result['status'], 'ok', result)
             self.assertEqual(command.call_count, 2)
+
+    def test_context_and_web_plugins_are_installed_at_pinned_versions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            packages = ('context-mode', 'pi-web-access')
+            for package in packages:
+                (path.parent / 'npm/node_modules' / package / 'package.json').unlink()
+            installed = []
+            def execute(pi, arguments, timeout, environment):
+                if arguments == ['--version']:
+                    return '1.4.0\n'
+                self.assertEqual(arguments[0], 'install')
+                package = next(name for name in packages if arguments[1] == 'npm:' + name + '@' + PACKAGE_VERSIONS[name])
+                installed.append(package)
+                metadata = path.parent / 'npm/node_modules' / package / 'package.json'
+                metadata.write_text(json.dumps({'version': PACKAGE_VERSIONS[package]}))
+                return ''
+            with patch.object(guest_setup, 'execute', side_effect=execute):
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'ok', result)
+            self.assertEqual(installed, list(packages))
+            self.assertTrue(json.loads(path.read_text())['compaction']['enabled'])
 
     def test_subagent_config_changed_since_preflight_blocks_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:

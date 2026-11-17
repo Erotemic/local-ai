@@ -86,7 +86,8 @@ Setup checks `pi --version` and runs `pi update` if below the recipe-tested
 baseline of 1.4.0. `--no-upgrade-pi` makes that condition an error instead. This
 baseline is a reproducible recipe choice rather than an upstream minimum-version
 claim. It installs `pi-provider-litellm@4.4.2`, `pi-effort@0.1.1`, and
-`pi-subagents@0.89.0`. It preserves unrelated packages and package
+`pi-subagents@0.89.0`, `context-mode@1.0.169`, and `pi-web-access@0.48.0`.
+It preserves unrelated packages and package
 resource filters while pinning these declarations. Installation happens in
 personal scope, never with `-l`. Package commands run outside any project directory.
 
@@ -104,11 +105,28 @@ setup does not replace such overrides or install cloud-provider credentials.
 
 After setup, start a fresh pi session and run `/subagents-doctor`. Try:
 `Use scout to identify the files involved in this task; return a short summary.`
-Setup never launches a child itself. Web access is not installed; the packaged
-research roles that need it will require separate setup. See the upstream
+Setup never launches a child itself. Web access is installed globally for pi;
+existing child extension overrides may still affect its availability to a
+particular role. See the upstream
 [subagent configuration](https://github.com/nicobailon/pi-subagents/blob/main/docs/configuration.md)
 and [model inheritance](https://github.com/nicobailon/pi-subagents/blob/main/docs/models.md)
 documentation.
+
+Context Mode supplies pi tools/skills for indexing and searching tool output,
+alongside session/compaction integration. The pin is the last published 1.x
+release compatible with Node >=22.5; current 2.x requires Node >=24.15, which is
+newer than aivm's Node 22.19 bootstrap. Setup does not upgrade the machine's Node
+installation to adopt 2.x. Both its pi entrypoint and skills are included in the
+published package. Start a fresh session, then use `/ctx-doctor` and `/ctx-stats`
+to inspect the integration. Native automatic compaction remains enabled.
+See the [Context Mode pi guide](https://contextmode.ai/blog/pi-coding-agent-context-mode).
+
+Pi Web Access supplies search, readable page extraction, and PDF tools.
+Setup installs it without creating API keys or configuring paid services. Its
+default search may contact external providers; a self-hosted SearXNG URL or
+explicit provider selection can be configured separately in
+`~/.pi/agent/web-search.json`. No search or fetch is run by setup or the doctor.
+See the [web-access documentation](https://github.com/nicobailon/pi-web-access).
 
 Setup resolves aivm's user-local Node installations under
 `~/.local/share/aivm/node/node-v*-linux-*/bin` (and the `AIVM_NODE_ROOT` /

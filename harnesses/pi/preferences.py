@@ -1,7 +1,14 @@
 """Shared settings policy used by the host doctor and guest setup."""
 import copy
 
-PACKAGE_VERSIONS = {'pi-provider-litellm': '4.4.2', 'pi-effort': '0.1.1', 'pi-subagents': '0.89.0'}
+PACKAGE_VERSIONS = {
+    'pi-provider-litellm': '4.4.2',
+    'pi-effort': '0.1.1',
+    'pi-subagents': '0.89.0',
+    # context-mode 2.x needs Node >=24.15; keep aivm's Node 22.19 supported.
+    'context-mode': '1.0.169',
+    'pi-web-access': '0.48.0',
+}
 MIN_PI_VERSION = (1, 4, 0)  # Recipe-tested baseline, not a claim about upstream minimums.
 
 
