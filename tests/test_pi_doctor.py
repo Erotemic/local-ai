@@ -38,8 +38,23 @@ class PiDoctorTests(unittest.TestCase):
         with patch.object(doctor, 'run', return_value=(1, '')):
             doctor.inspect_network(SimpleNamespace(timeout=1), vm, 'http://10.78.0.1:14042', report)
         self.assertFalse(report['connection']['preview_safe'])
+        self.assertFalse(report['connection']['endpoint_preview_safe'])
         self.assertEqual(report['proposed_changes'], [])
         self.assertIn('outside configured subnet', report['network_drift'][0])
+
+    def test_bridge_only_drift_does_not_block_pi_endpoint_preview(self):
+        vm = {'network': {'name': 'aivm-net', 'gateway_ip': '10.77.0.1', 'subnet_cidr': '10.77.0.0/24', 'bridge': 'virbr-aivm'},
+              'cached_ip': '10.77.0.195', 'firewall': {'enabled': True, 'allow_tcp_endpoints': []}}
+        live = dict(vm['network'], bridge='virbr-aivm-net')
+        report = {'warnings': [], 'notes': [], 'proposed_changes': []}
+        doctor.check_network_drift(vm, live, report)
+        with patch.object(doctor, 'run', return_value=(1, '')):
+            doctor.inspect_network(SimpleNamespace(timeout=1), vm, 'http://10.77.0.1:14042', report)
+        self.assertTrue(report['network_drift'])
+        self.assertEqual(report['endpoint_drift'], [])
+        self.assertFalse(report['connection']['preview_safe'])
+        self.assertTrue(report['connection']['endpoint_preview_safe'])
+        self.assertEqual(report['proposed_changes'], [])  # Still no firewall changes.
 
     def test_guest_route_disagreement_withholds_endpoint_changes(self):
         guest = {'pi_path': '/bin/pi', 'packages': ['npm:pi-provider-litellm', 'npm:pi-effort'],
@@ -57,6 +72,7 @@ class PiDoctorTests(unittest.TestCase):
         with patch.object(doctor, 'ssh_argv', return_value=['ssh', 'vm']), patch.object(doctor, 'run', return_value=(0, json.dumps(guest))):
             doctor.inspect_pi(args, {}, 'http://10.78.0.1:14042', 'TEST', report)
         self.assertFalse(report['connection']['preview_safe'])
+        self.assertFalse(report['connection']['endpoint_preview_safe'])
         self.assertEqual(report['proposed_changes'], [])
 
     def test_linux_default_route_decoding(self):

@@ -228,7 +228,7 @@ class PiSetupTests(unittest.TestCase):
                    'auth_revision': 'auth-revision', 'provider': 'litellm-namek',
                    'desired_endpoint': {'status': 'ok', 'models': ['model']},
                    'baseUrl': 'http://0.0.0.0:14042', 'credential_matches': True},
-            'connection': {'preview_safe': True, 'provider_url': 'http://10.77.0.1:14042'},
+            'connection': {'preview_safe': False, 'endpoint_preview_safe': True, 'provider_url': 'http://10.77.0.1:14042'},
             'selected_model': 'model', 'aivm': {},
             'desired_preferences': desired_preferences(doctor.BASELINE, 'litellm-namek', 'model', 'medium'),
             'model_capabilities': {'status': 'ok', 'reasoning_effort_levels': [], 'supports_reasoning': False},

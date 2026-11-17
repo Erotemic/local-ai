@@ -66,7 +66,7 @@ Setup uses the existing default/sole VM and selected LiteLLM alias, such as
 `litellm-namek`. It sends its code and preferences over SSH, with no checkout or
 helper installation in the guest. This first setup step requires an already
 direct endpoint reachable from the guest, a credential matching infer-stack,
-a discoverable model, and consistent network data. It sets the selected pi
+a discoverable model, and consistent endpoint addressing. It sets the selected pi
 provider URL to the verified direct endpoint. If `auth.json` contains a
 `LITELLM_BASE_URL` override for that provider, setup updates that URL too, because
 it takes precedence over provider settings. Credential values, other providers,
@@ -165,9 +165,14 @@ Firewall config is reported as desired state; live nftables rules are not
 inspected. Active network XML is queried with `virsh --readonly` against
 `qemu:///system`; no sudo or network activation is attempted. If available,
 the live gateway is used for the candidate endpoint. Otherwise the configured
-gateway remains an unverified candidate. Config/live network drift, a cached IP
-outside the configured subnet, or a conflicting guest default route suppresses
-endpoint and firewall change proposals until reconciled. Other pi preference
+gateway remains an unverified candidate. All config/live network drift suppresses
+firewall change proposals. Gateway/subnet drift, a cached IP outside the configured
+subnet, or a conflicting guest default route also suppresses endpoint changes.
+A bridge-name-only mismatch remains a warning: `connection.preview_safe` is false
+for firewall changes, while `connection.endpoint_preview_safe` remains true for
+pi configuration when addressing agrees. Setup still requires successful
+authenticated model discovery from the guest and matching credentials. It does
+not edit the host bridge or firewall to resolve the mismatch. Other pi preference
 changes can still be previewed. Guest default routes come from `/proc/net/route`.
 The currently configured pi endpoint is also checked using its own resolved
 guest credential; the host credential is used only for the derived endpoint.

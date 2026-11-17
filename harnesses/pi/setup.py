@@ -39,8 +39,8 @@ def main():
     levels = report.get('model_capabilities', {}).get('reasoning_effort_levels', [])
     effort = args.effort or doctor.BASELINE['defaultThinkingLevel']
     reasons = []
-    if not connection.get('preview_safe') or not guest.get('pi_path'):
-        reasons.append('VM/pi discovery must succeed without network drift.')
+    if not connection.get('endpoint_preview_safe', connection.get('preview_safe')) or not guest.get('pi_path'):
+        reasons.append('VM/pi discovery must succeed without endpoint addressing or guest-route drift.')
     if guest.get('desired_endpoint', {}).get('status') != 'ok' or model not in guest.get('desired_endpoint', {}).get('models', []):
         reasons.append('The selected model must be discoverable from the guest.')
     if guest.get('credential_matches') is not True:

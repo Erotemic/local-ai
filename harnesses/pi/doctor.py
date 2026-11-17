@@ -158,21 +158,33 @@ def query_live_network(args, vm, report):
 
 def check_network_drift(vm, live, report):
     drift = []
+    endpoint_drift = []
     configured = vm['network']
     if live:
         for field in ('gateway_ip', 'subnet_cidr', 'bridge'):
             if live.get(field) != configured.get(field):
-                drift.append('Configured ' + field + '=' + str(configured.get(field)) + '; live libvirt=' + str(live.get(field)))
+                message = 'Configured ' + field + '=' + str(configured.get(field)) + '; live libvirt=' + str(live.get(field))
+                drift.append(message)
+                if field != 'bridge':
+                    endpoint_drift.append(message)
     cached = vm.get('cached_ip')
     if cached:
         try:
             if ipaddress.ip_address(cached) not in ipaddress.ip_network(configured['subnet_cidr'], strict=False):
-                drift.append('Cached VM address ' + cached + ' is outside configured subnet ' + configured['subnet_cidr'])
+                message = 'Cached VM address ' + cached + ' is outside configured subnet ' + configured['subnet_cidr']
+                drift.append(message)
+                endpoint_drift.append(message)
         except (ValueError, KeyError):
             drift.append('Cannot validate cached VM address against configured subnet')
+            endpoint_drift.append(drift[-1])
     report['network_drift'] = drift
+    report['endpoint_drift'] = endpoint_drift
     if drift:
-        report['warnings'].append('VM network configuration may be stale; endpoint/firewall changes are withheld pending reconciliation.')
+        report['warnings'].append('VM network configuration differs from live state; firewall change proposals are withheld pending reconciliation.')
+    if endpoint_drift:
+        report['warnings'].append('Endpoint addressing also disagrees; pi endpoint changes are withheld.')
+    elif drift:
+        report['notes'].append('Only the bridge name differs; pi may use the direct endpoint if guest connectivity and credentials are verified. Host network configuration is left unchanged.')
     return not drift
 
 
@@ -185,7 +197,8 @@ def inspect_network(args, vm, url, report):
     report['connection'] = {'provider_url': url, 'endpoint': endpoint,
                             'endpoint_exception_present': present,
                             'firewall_enabled': firewall['enabled'],
-                            'preview_safe': not report.get('network_drift')}
+                            'preview_safe': not report.get('network_drift'),
+                            'endpoint_preview_safe': not report.get('endpoint_drift', report.get('network_drift'))}
     if not present and report['connection']['preview_safe']:
         report['proposed_changes'].append('Add ' + endpoint + ' to network ' + vm['network']['name'] + ' firewall.allow_tcp_endpoints (preserve other entries).')
     if not firewall['enabled']:
@@ -255,6 +268,7 @@ def inspect_pi(args, vm, url, key, report):
             report.setdefault('network_drift', []).append('Guest default gateway(s) ' + ', '.join(best) + ' differ from selected host gateway ' + report['connection_gateway'])
             report['warnings'].append('Guest routing disagrees with the selected network; endpoint/firewall changes are withheld.')
             connection['preview_safe'] = False
+            connection['endpoint_preview_safe'] = False
             # Policy preview was derived before the guest routing probe.
             report['proposed_changes'] = [change for change in report['proposed_changes']
                                           if not change.startswith('Add ' + connection.get('endpoint', '') + ' to network ')]
@@ -275,9 +289,10 @@ def inspect_pi(args, vm, url, key, report):
     provider = args.provider or guest['provider']
     if guest['defaultProvider'] != provider:
         changes.append('Select default pi provider ' + provider + '.')
-    if url and connection.get('preview_safe', False) and guest['baseUrl'] != url:
+    endpoint_safe = connection.get('endpoint_preview_safe', connection.get('preview_safe', False))
+    if url and endpoint_safe and guest['baseUrl'] != url:
         changes.append('Set pi provider URL to ' + url + ' (direct host endpoint).')
-    if url and connection.get('preview_safe', False) and url.startswith('http:') and not guest['allowInsecureHttp']:
+    if url and endpoint_safe and url.startswith('http:') and not guest['allowInsecureHttp']:
         changes.append('Enable allowInsecureHttp for this explicit non-loopback HTTP provider.')
     if guest['credential_matches'] is False:
         changes.append('Synchronize guest credential from infer-stack (values redacted).')
