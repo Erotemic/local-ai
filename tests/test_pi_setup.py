@@ -1,0 +1,149 @@
+"""Verify settings preservation, backups, and setup preflight gates."""
+import contextlib
+import hashlib
+import io
+import json
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+RECIPE = Path(__file__).resolve().parents[1] / 'harnesses/pi'
+sys.path.insert(0, str(RECIPE))
+import doctor
+import guest_probe
+import guest_setup
+import setup as pi_setup
+from preferences import desired_preferences, PACKAGE_VERSIONS
+
+
+class PiSetupTests(unittest.TestCase):
+    def fixture(self, root):
+        path = root / 'settings.json'
+        path.write_text(json.dumps({'litellm': {'providers': {'litellm-namek': {'apiKey': 'TEST-SECRET', 'baseUrl': 'http://10.77.0.1:14042'}}},
+                                    'unrelated': {'preserve': True}, 'compaction': {'reserveTokens': 32768},
+                                    'packages': [{'source': 'npm:pi-provider-litellm', 'extensions': ['./src/index.ts']}, 'npm:unrelated']}))
+        for name, version in PACKAGE_VERSIONS.items():
+            metadata = root / 'npm/node_modules' / name / 'package.json'
+            metadata.parent.mkdir(parents=True)
+            metadata.write_text(json.dumps({'version': version}))
+        payload = {'settings_path': str(path), 'settings_revision': hashlib.sha256(path.read_bytes()).hexdigest(),
+                   'pi_path': '/fake/pi', 'upgrade_pi': True, 'install_timeout': 1,
+                   'preferences': desired_preferences(doctor.BASELINE, 'litellm-namek', 'model', 'medium')}
+        return path, payload
+
+    def test_merge_preserves_credentials_and_unmanaged_settings_with_private_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            before = path.read_bytes()
+            with patch.object(guest_setup, 'execute', return_value='1.4.0\n'):
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'ok')
+            updated = json.loads(path.read_text())
+            self.assertEqual(updated['litellm']['providers']['litellm-namek']['apiKey'], 'TEST-SECRET')
+            self.assertEqual(updated['compaction'], {'enabled': True, 'reserveTokens': 32768})
+            self.assertEqual(updated['retry']['provider']['timeoutMs'], 900000)
+            self.assertEqual(updated['defaultThinkingLevel'], 'medium')
+            self.assertEqual(updated['pi-effort']['modelEffort']['litellm-namek/model'], 'medium')
+            self.assertTrue(updated['unrelated']['preserve'])
+            self.assertEqual(updated['packages'][0]['extensions'], ['./src/index.ts'])
+            self.assertIn('npm:unrelated', updated['packages'])
+            backup = Path(result['backup'])
+            self.assertEqual(backup.read_bytes(), before)
+            self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertNotIn('TEST-SECRET', json.dumps(result))
+            payload['settings_revision'] = hashlib.sha256(path.read_bytes()).hexdigest()
+            stable = path.read_bytes()
+            with patch.object(guest_setup, 'execute', return_value='1.4.0\n') as command:
+                self.assertEqual(guest_setup.apply(payload)['status'], 'ok')
+            self.assertEqual(path.read_bytes(), stable)
+            self.assertEqual(command.call_count, 1)  # Version check only; no reinstall.
+
+    def test_settings_changed_after_preflight_are_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            path.write_text('{"concurrent": true}')
+            with patch.object(guest_setup, 'execute') as command:
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'failed')
+            command.assert_not_called()
+            self.assertEqual(path.read_text(), '{"concurrent": true}')
+            self.assertEqual(list(path.parent.glob('settings.json.before-*')), [])
+
+    def test_package_failure_retains_backup_and_reports_no_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            (path.parent / 'npm/node_modules/pi-effort/package.json').unlink()
+            before = path.read_bytes()
+            with patch.object(guest_setup, 'execute', side_effect=['1.4.0\n', RuntimeError('package install failed')]):
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(Path(result['backup']).read_bytes(), before)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertNotIn('TEST-SECRET', json.dumps(result))
+
+    def test_old_pi_can_be_blocked_without_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            payload['upgrade_pi'] = False
+            before = path.read_bytes()
+            with patch.object(guest_setup, 'execute', return_value='0.87.1\n'):
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(path.parent.glob('settings.json.before-*')), [])
+
+    def test_old_pi_is_upgraded_before_preferences_are_applied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            with patch.object(guest_setup, 'execute', side_effect=['0.87.1\n', '', '1.4.0\n']) as command:
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'ok')
+            self.assertEqual(command.call_args_list[1].args[1], ['update'])
+            self.assertEqual(json.loads(path.read_text())['retry']['maxRetries'], 5)
+
+    def test_remote_program_runs_without_checkout_or_helper_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path, payload = self.fixture(root)
+            pi = root / 'pi'
+            pi.write_text('#!' + sys.executable + '\nprint("1.4.0")\n')
+            pi.chmod(0o700)
+            payload['pi_path'] = str(pi)
+            result = subprocess.run([sys.executable, '-B', '-c', pi_setup.remote_source()],
+                                    input=json.dumps(payload), text=True, capture_output=True, cwd='/')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['status'], 'ok')
+            self.assertEqual(json.loads(path.read_text())['defaultThinkingLevel'], 'medium')
+            self.assertNotIn('TEST-SECRET', result.stdout + result.stderr)
+
+    def test_host_does_not_apply_without_verified_connectivity_or_effort(self):
+        report = {'pi': {}, 'proposed_changes': [], 'warnings': []}
+        output = io.StringIO()
+        with patch.object(sys, 'argv', ['setup', '--model', 'model']), patch.object(doctor, 'collect', return_value=(report, None, None)), patch.object(doctor, 'run') as command, contextlib.redirect_stdout(output):
+            self.assertEqual(pi_setup.main(), 1)
+        command.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue())['status'], 'blocked')
+
+    def test_capability_metadata_limits_effort_to_advertised_levels(self):
+        reply = {'status': 'ok', 'data': {'data': [{'model_name': 'model', 'model_info': {'supports_reasoning': True, 'reasoning_effort_levels': ['low', 'medium', 'xhigh']}}]}}
+        with patch.object(guest_probe, 'gateway_json', return_value=reply):
+            result = guest_probe.capabilities('http://127.0.0.1:14042', 'TEST-SECRET', 1, 'model')
+        self.assertEqual(result['reasoning_effort_levels'], ['low', 'medium', 'xhigh'])
+        self.assertNotIn('TEST-SECRET', json.dumps(result))
+
+    def test_unknown_explicit_provider_does_not_borrow_another_providers_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _ = self.fixture(Path(tmp))
+            with patch.dict(guest_probe.os.environ, {'PI_CODING_AGENT_DIR': str(path.parent), 'LITELLM_API_KEY': ''}):
+                result = guest_probe.inspect_guest({'provider': 'typo', 'url': None, 'key': 'TEST-SECRET', 'timeout': 1})
+            self.assertEqual(result['provider'], 'typo')
+            self.assertIsNone(result['credential_matches'])
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -12,10 +12,12 @@ import sys
 import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit, urlunsplit
 
-from guest_probe import models, safe_url
+from guest_probe import models, safe_url, capabilities
+from preferences import desired_preferences, differences, PACKAGE_VERSIONS, MIN_PI_VERSION
 
 HERE = Path(__file__).resolve().parent
 PACKAGES = ('pi-provider-litellm', 'pi-effort')
+BASELINE = json.loads((HERE / 'preferences.json').read_text())
 
 
 def run(argv, timeout, data=None):
@@ -231,7 +233,8 @@ def inspect_pi(args, vm, url, key, report):
     if args.skip_guest:
         report['notes'].append('Guest checks skipped by request.')
         return
-    payload = {'url': url, 'key': key, 'timeout': args.timeout, 'provider': args.provider}
+    payload = {'url': url, 'key': key, 'timeout': args.timeout, 'provider': args.provider,
+               'model': args.model, 'preferences': desired_preferences(BASELINE, args.provider, args.model, getattr(args, 'effort', None))}
     script = (HERE / 'guest_probe.py').read_text()
     argv = ssh_argv(args, vm, report) + ['python3 -B -c ' + shlex.quote(script)]
     code, output = run(argv, args.timeout * 3, json.dumps(payload))
@@ -258,9 +261,15 @@ def inspect_pi(args, vm, url, key, report):
     changes = report['proposed_changes']
     if not guest['pi_path']:
         changes.append('Provision pi through aivm before applying personal settings.')
+    version = guest.get('pi_version')
+    try:
+        if tuple(int(part) for part in version.split('.')[:3]) < MIN_PI_VERSION:
+            changes.append('Upgrade pi to the recipe-tested baseline >=1.4.0.')
+    except (AttributeError, ValueError):
+        report['notes'].append('Pi version unavailable from installation metadata; setup will verify it before applying preferences.')
     for package in PACKAGES:
-        if not any(isinstance(p, str) and (p == 'npm:' + package or p.startswith('npm:' + package + '@')) for p in guest['packages']):
-            changes.append('Install personal pi package npm:' + package + '.')
+        if guest.get('package_versions', {}).get(package) != PACKAGE_VERSIONS[package]:
+            changes.append('Install personal pi package npm:' + package + '@' + PACKAGE_VERSIONS[package] + '.')
     if guest['theme'] != 'dark':
         changes.append('Set pi theme to dark.')
     provider = args.provider or guest['provider']
@@ -278,6 +287,11 @@ def inspect_pi(args, vm, url, key, report):
     report['selected_model'] = model
     if args.model and args.model != guest['defaultModel']:
         changes.append('Set pi defaultModel to ' + args.model + '.')
+    preferences = desired_preferences(BASELINE, provider, model, getattr(args, 'effort', None))
+    report['desired_preferences'] = preferences
+    for path, value in differences(guest.get('preferences', {}), preferences):
+        if path not in ('theme', 'defaultProvider', 'defaultModel'):
+            changes.append('Set pi ' + path + ' to ' + json.dumps(value) + '.')
     probe = guest['desired_endpoint']
     if probe['status'] != 'ok':
         report['warnings'].append('Guest → desired endpoint model discovery: ' + probe['status'])
@@ -291,7 +305,7 @@ def inspect_pi(args, vm, url, key, report):
         report['notes'].append('The currently configured pi endpoint passed authenticated model discovery using the guest credential.')
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--vm', default='', help='Override the default/single VM')
     parser.add_argument('--aivm-config', help='Existing aivm config store path')
@@ -300,12 +314,14 @@ def main():
     parser.add_argument('--ssh-target', help='Existing SSH alias or user@address; no SSH configuration is created')
     parser.add_argument('--provider', help='Pi provider to inspect; default: existing default/only provider')
     parser.add_argument('--model', help='Desired model; default: preserve guest selection')
+    parser.add_argument('--effort', choices=('low', 'medium', 'xhigh'), help='Startup effort; default: medium from preferences.json')
     parser.add_argument('--skip-guest', action='store_true')
     parser.add_argument('--timeout', type=int, default=10, help='Per-command/network timeout in seconds')
     parser.add_argument('--json', action='store_true', help='Print a shareable report with credentials omitted')
-    args = parser.parse_args()
-    if args.timeout < 1:
-        parser.error('--timeout must be positive')
+    return parser
+
+
+def collect(args):
     report = {'read_only': True, 'warnings': [], 'notes': [], 'proposed_changes': []}
     vm = query_aivm(args, report)
     url, key = query_stack(args, report)
@@ -329,6 +345,21 @@ def main():
         report['warnings'].append('Requested model is absent from host model discovery: ' + args.model)
     if not vm or not url:
         report['notes'].append('Discovery is incomplete; the proposed change list is partial.')
+    model = args.model or report.get('selected_model')
+    if url and key and model:
+        report['model_capabilities'] = capabilities(url, key, args.timeout, model)
+        effort = args.effort or BASELINE['defaultThinkingLevel']
+        if effort not in report['model_capabilities']['reasoning_effort_levels']:
+            report['warnings'].append('Gateway metadata does not advertise requested effort ' + effort + '; setup will require explicit support.')
+    return report, url, key
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.timeout < 1:
+        parser.error('--timeout must be positive')
+    report, _, _ = collect(args)
     if args.json:
         print(json.dumps(report, indent=2))
     else:

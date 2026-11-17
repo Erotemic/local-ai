@@ -1,0 +1,18 @@
+{
+  "theme": "dark",
+  "defaultThinkingLevel": "medium",
+  "retry": {
+    "enabled": true,
+    "maxRetries": 5,
+    "baseDelayMs": 2000,
+    "maxAgentDelayMs": 60000,
+    "provider": {
+      "timeoutMs": 900000,
+      "maxRetries": 0,
+      "maxRetryDelayMs": 60000
+    }
+  },
+  "compaction": {
+    "enabled": true
+  }
+}

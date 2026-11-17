@@ -48,6 +48,8 @@ class PiDoctorTests(unittest.TestCase):
                  'credential_matches': True, 'defaultModel': 'model',
                  'desired_endpoint': {'status': 'URLError'},
                  'current_endpoint': {'status': 'ok', 'models': ['model']},
+                 'package_versions': doctor.PACKAGE_VERSIONS,
+                 'preferences': doctor.desired_preferences(doctor.BASELINE, 'litellm', 'model'),
                  'default_routes': [{'gateway': '10.77.0.1', 'metric': 100}]}
         report = {'notes': [], 'warnings': [], 'proposed_changes': ['Add 10.78.0.1:14042 to network aivm-net firewall.allow_tcp_endpoints (preserve other entries).'],
                   'connection_gateway': '10.78.0.1', 'connection': {'preview_safe': True, 'endpoint': '10.78.0.1:14042'}}

@@ -1,4 +1,4 @@
-# Pi host doctor
+# Pi configuration from the host
 
 Run this on the host where aivm manages the VM and infer-stack serves the
 gateway. Neither repository needs to be checked out alongside local-ai, and
@@ -37,16 +37,73 @@ It reports:
 - Proposed changes to endpoint exceptions, pi preferences, extensions, model,
   and credential synchronization.
 
-No setup command exists yet. The proposed changes are a preview, not an
-executable plan. The existing guest model/provider is preserved unless
-`--model`/`--provider` is supplied; the preference baseline is dark theme plus
-`pi-provider-litellm` and `pi-effort`.
+The existing guest model/provider is preserved unless `--model`/`--provider`
+is supplied. The versioned preference baseline lives in
+[`preferences.json`](preferences.json): dark theme, medium startup effort,
+automatic compaction, five agent retries with 2-second initial backoff and a
+60-second delay cap, and a 15-minute provider timeout. Provider retries remain
+zero so pi handles retries at the agent level. Existing compaction token limits
+are preserved. The doctor reports differences against the same policy setup
+uses, installed extension versions, and the gateway's advertised effort levels.
+
+## Apply pi preferences
+
+Close pi in the guest before setup, so a running session does not overwrite
+the updated preferences on exit. Run these commands on the host:
+
+```bash
+./harnesses/pi/setup.sh \
+  --model qwen3.8-27b-dbirks-hyperqwen-long --effort medium --dry-run
+
+./harnesses/pi/setup.sh \
+  --model qwen3.8-27b-dbirks-hyperqwen-long --effort medium
+
+./harnesses/pi/doctor.sh \
+  --model qwen3.8-27b-dbirks-hyperqwen-long --effort medium --json
+```
+
+Setup uses the existing default/sole VM and selected LiteLLM alias, such as
+`litellm-namek`. It sends its code and preferences over SSH, with no checkout or
+helper installation in the guest. This first setup step requires an already
+working provider URL and credential matching infer-stack, a discoverable model,
+consistent network data, and model metadata declaring support for the requested
+effort. It does not apply firewall changes or rewrite endpoint/credential files.
+If effort metadata is missing, configure `reasoning_efforts: [low, medium,
+xhigh]` on the appropriate HyperQwen infer-stack endpoint and publish that change
+through infer-stack before retrying; model-list presence alone does not establish
+reasoning support.
+
+Setup checks `pi --version` and runs `pi update` if below the recipe-tested
+baseline of 1.4.0. `--no-upgrade-pi` makes that condition an error instead. This
+baseline is a reproducible recipe choice rather than an upstream minimum-version
+claim. It installs `pi-provider-litellm@4.4.2` and `pi-effort@0.1.1`, the extension
+versions from the working VM. It preserves unrelated packages and package
+resource filters while pinning these two declarations. Installation happens in
+personal scope, never with `-l`. Package commands run outside any project directory.
+
+Before any upgrade/install/settings changes, setup saves a private mode-0600
+`settings.json.before-local-ai-*` backup in the guest agent directory. Settings
+merges preserve credentials, other providers, and unrelated settings. The final
+settings write is atomic and mode 0600. Failures keep the backup and report its
+path; package caches/installations may have changed and are not rolled back.
+Concurrent edits detected before the final write are not overwritten.
+
+Medium effort is written as pi's startup default and as the selected model's
+entry in both pi's `modelThinkingLevels` and pi-effort's remembered `modelEffort`
+map. Other models' entries are preserved. This avoids an older per-model choice
+overriding the new default. Start a fresh pi session, run `/litellm-refresh`, then
+`/effort` to inspect available levels. The doctor verifies stored configuration
+and advertised metadata; it does not execute a generation or force compaction.
+
+The setting names and effort behavior are documented in the upstream
+[pi settings reference](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md)
+and [pi-effort documentation](https://pi.dev/packages/pi-effort).
 
 ## Read-only behavior and limits
 
 The doctor does not provision software, generate tokens, start VMs, change
 firewalls, repair configuration, mount directories, or make inference requests.
-Only authenticated model-list GET requests are made; HTTP redirects and proxy
+Only authenticated model-list and model-info GET requests are made; HTTP redirects and proxy
 environment variables are disabled for these probes.
 
 `aivm config show --resolved` can persist SSH defaults, and its public store
