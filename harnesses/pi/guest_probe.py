@@ -148,6 +148,9 @@ def inspect_guest(payload):
         return {name: selected(current.get(name, {}) if isinstance(current.get(name), dict) else {}, value)
                 if isinstance(value, dict) else current.get(name)
                 for name, value in template.items()}
+    subagent_path = root / 'extensions/subagent/config.json'
+    subagent_bytes = subagent_path.read_bytes() if subagent_path.exists() else b''
+    subagent_config = json.loads(subagent_bytes) if subagent_bytes else {}
     result = {
         'settings_path': str(settings_path), 'settings_exists': settings_path.exists(),
         'settings_revision': hashlib.sha256(settings_bytes).hexdigest(),
@@ -162,6 +165,8 @@ def inspect_guest(payload):
         'credential_matches': key == payload['key'] if key and payload['key'] else None,
         'default_routes': default_routes(),
         'preferences': selected(settings, desired),
+        'subagent_config': selected(subagent_config, payload.get('subagent_config', {})),
+        'subagent_config_revision': hashlib.sha256(subagent_bytes).hexdigest(),
         'package_versions': {},
         'pi_version': None,
         'desired_endpoint': models(payload['url'], payload['key'], payload['timeout']) if payload['url'] and payload['key'] else {'status': 'not checked'},
@@ -184,7 +189,7 @@ def inspect_guest(payload):
                 break
         except (OSError, ValueError, KeyError):
             pass
-    for package in ('pi-provider-litellm', 'pi-effort'):
+    for package in payload.get('package_names', ('pi-provider-litellm', 'pi-effort', 'pi-subagents')):
         metadata = root / 'npm/node_modules' / package / 'package.json'
         try:
             result['package_versions'][package] = json.loads(metadata.read_text())['version']

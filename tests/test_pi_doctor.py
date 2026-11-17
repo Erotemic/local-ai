@@ -64,6 +64,7 @@ class PiDoctorTests(unittest.TestCase):
                  'desired_endpoint': {'status': 'URLError'},
                  'current_endpoint': {'status': 'ok', 'models': ['model']},
                  'package_versions': doctor.PACKAGE_VERSIONS,
+                 'subagent_config': doctor.SUBAGENT_CONFIG,
                  'preferences': doctor.desired_preferences(doctor.BASELINE, 'litellm', 'model'),
                  'default_routes': [{'gateway': '10.77.0.1', 'metric': 100}]}
         report = {'notes': [], 'warnings': [], 'proposed_changes': ['Add 10.78.0.1:14042 to network aivm-net firewall.allow_tcp_endpoints (preserve other entries).'],

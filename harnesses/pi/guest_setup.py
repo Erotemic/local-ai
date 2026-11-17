@@ -117,6 +117,20 @@ def _apply(payload):
     initial = json.loads(original)
     if not isinstance(initial, dict):
         raise RuntimeError('Pi settings must be a JSON object.')
+    subagent_path = path.parent / 'extensions/subagent/config.json'
+    subagent_original, subagent_updated = None, None
+    if payload.get('subagent_config') is not None:
+        if subagent_path.is_symlink() or (subagent_path.exists() and not subagent_path.is_file()):
+            raise RuntimeError('Expected a regular subagent config file; no changes made.')
+        subagent_original = subagent_path.read_bytes() if subagent_path.exists() else b''
+        if hashlib.sha256(subagent_original).hexdigest() != payload.get('subagent_config_revision'):
+            raise RuntimeError('Subagent config changed since preflight; rerun setup with pi closed.')
+        current = json.loads(subagent_original) if subagent_original else {}
+        if not isinstance(current, dict):
+            raise RuntimeError('Subagent config must be a JSON object.')
+        merged = merge(current, payload['subagent_config'])
+        if merged != current:
+            subagent_updated = (json.dumps(merged, indent=2) + '\n').encode()
     connection = payload.get('connection')
     auth_path = path.parent / 'auth.json'
     auth_original, auth_updated = None, None
@@ -150,6 +164,8 @@ def _apply(payload):
     backup_name = backup(path, original)
     result = {'backup': backup_name, 'settings_path': str(path), 'packages': PACKAGE_VERSIONS}
     try:
+        if subagent_updated is not None and subagent_original:
+            result['subagent_config_backup'] = backup(subagent_path, subagent_original)
         if auth_updated is not None:
             result['auth_backup'] = backup(auth_path, auth_original)
         if version < MIN_PI_VERSION:
@@ -181,7 +197,7 @@ def _apply(payload):
             if connection['url'].startswith('http:'):
                 provider_settings['allowInsecureHttp'] = True
             updated = merge(updated, {'litellm': {'providers': {connection['provider']: provider_settings}}})
-        # Replace only the two recipe package declarations; retain resource
+        # Replace only recipe package declarations; retain resource
         # filters on package objects and every unrelated package/provider.
         packages, seen = [], set()
         for entry in updated.get('packages', []):
@@ -202,10 +218,17 @@ def _apply(payload):
             raise RuntimeError('Pi settings changed during setup; refusing to overwrite concurrent edits.')
         if connection and (auth_path.read_bytes() if auth_path.exists() else b'') != auth_original:
             raise RuntimeError('Pi auth changed during setup; refusing to overwrite concurrent edits.')
+        if subagent_original is not None and (subagent_path.read_bytes() if subagent_path.exists() else b'') != subagent_original:
+            raise RuntimeError('Subagent config changed during setup; refusing to overwrite concurrent edits.')
         if updated != settings:
             atomic_write(path, (json.dumps(updated, indent=2) + '\n').encode())
         if auth_updated is not None:
             atomic_write(auth_path, (json.dumps(auth_updated, indent=2) + '\n').encode())
+        if subagent_updated is not None:
+            subagent_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            atomic_write(subagent_path, subagent_updated)
+        if subagent_original is not None:
+            result['subagent_config_path'] = str(subagent_path)
         if connection:
             result['provider_url'] = connection['url']
             result['provider'] = connection['provider']

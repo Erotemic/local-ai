@@ -52,10 +52,12 @@ def main():
     payload.update(preferences=report['desired_preferences'], upgrade_pi=not args.no_upgrade_pi,
                    install_timeout=args.install_timeout,
                    connection={'provider': guest['provider'], 'url': connection['provider_url']},
-                   auth_revision=guest['auth_revision'])
+                   auth_revision=guest['auth_revision'],
+                   subagent_config=doctor.SUBAGENT_CONFIG,
+                   subagent_config_revision=guest['subagent_config_revision'])
     # Ship code through SSH; no checkout or helper installation in the VM.
     argv = doctor.ssh_argv(args, report['aivm'], report) + ['python3 -B -c ' + shlex.quote(remote_source())]
-    code, output = doctor.run(argv, args.install_timeout * 3 + 90, json.dumps(payload))
+    code, output = doctor.run(argv, args.install_timeout * (len(doctor.PACKAGE_VERSIONS) + 1) + 90, json.dumps(payload))
     try:
         result = json.loads(output)
     except ValueError:

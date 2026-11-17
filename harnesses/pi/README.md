@@ -85,10 +85,30 @@ saved local preferences alone do not establish reasoning support.
 Setup checks `pi --version` and runs `pi update` if below the recipe-tested
 baseline of 1.4.0. `--no-upgrade-pi` makes that condition an error instead. This
 baseline is a reproducible recipe choice rather than an upstream minimum-version
-claim. It installs `pi-provider-litellm@4.4.2` and `pi-effort@0.1.1`, the extension
-versions from the working VM. It preserves unrelated packages and package
-resource filters while pinning these two declarations. Installation happens in
+claim. It installs `pi-provider-litellm@4.4.2`, `pi-effort@0.1.1`, and
+`pi-subagents@0.89.0`. It preserves unrelated packages and package
+resource filters while pinning these declarations. Installation happens in
 personal scope, never with `-l`. Package commands run outside any project directory.
+
+The subagent policy lives in [`subagent-config.json`](subagent-config.json) and
+is merged into `~/.pi/agent/extensions/subagent/config.json` in the VM. Existing
+unrelated settings are preserved and changed files get private backups. The
+doctor compares this policy and its file revision, just like pi preferences.
+Defaults are eager tool exposure, one delegation level, serial parallel-task and
+per-run concurrency, one active async run per session, four children per run,
+and sixteen children per session. Scheduled runs are disabled. These are defaults
+with the plugin's documented override rules, not a global GPU scheduler.
+The selected effort also becomes `subagents.defaultThinking`. Built-in roles
+inherit the parent's model unless an existing role/model override specifies one;
+setup does not replace such overrides or install cloud-provider credentials.
+
+After setup, start a fresh pi session and run `/subagents-doctor`. Try:
+`Use scout to identify the files involved in this task; return a short summary.`
+Setup never launches a child itself. Web access is not installed; the packaged
+research roles that need it will require separate setup. See the upstream
+[subagent configuration](https://github.com/nicobailon/pi-subagents/blob/main/docs/configuration.md)
+and [model inheritance](https://github.com/nicobailon/pi-subagents/blob/main/docs/models.md)
+documentation.
 
 Setup resolves aivm's user-local Node installations under
 `~/.local/share/aivm/node/node-v*-linux-*/bin` (and the `AIVM_NODE_ROOT` /

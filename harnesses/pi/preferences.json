@@ -14,5 +14,8 @@
   },
   "compaction": {
     "enabled": true
+  },
+  "subagents": {
+    "defaultThinking": "medium"
   }
 }

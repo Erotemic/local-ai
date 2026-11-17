@@ -16,8 +16,9 @@ from guest_probe import models, safe_url, capabilities
 from preferences import desired_preferences, differences, PACKAGE_VERSIONS, MIN_PI_VERSION
 
 HERE = Path(__file__).resolve().parent
-PACKAGES = ('pi-provider-litellm', 'pi-effort')
+PACKAGES = tuple(PACKAGE_VERSIONS)
 BASELINE = json.loads((HERE / 'preferences.json').read_text())
+SUBAGENT_CONFIG = json.loads((HERE / 'subagent-config.json').read_text())
 
 
 def run(argv, timeout, data=None):
@@ -247,7 +248,8 @@ def inspect_pi(args, vm, url, key, report):
         report['notes'].append('Guest checks skipped by request.')
         return
     payload = {'url': url, 'key': key, 'timeout': args.timeout, 'provider': args.provider,
-               'model': args.model, 'preferences': desired_preferences(BASELINE, args.provider, args.model, getattr(args, 'effort', None))}
+               'model': args.model, 'preferences': desired_preferences(BASELINE, args.provider, args.model, getattr(args, 'effort', None)),
+               'package_names': list(PACKAGE_VERSIONS), 'subagent_config': SUBAGENT_CONFIG}
     script = (HERE / 'guest_probe.py').read_text()
     argv = ssh_argv(args, vm, report) + ['python3 -B -c ' + shlex.quote(script)]
     code, output = run(argv, args.timeout * 3, json.dumps(payload))
@@ -307,6 +309,8 @@ def inspect_pi(args, vm, url, key, report):
     for path, value in differences(guest.get('preferences', {}), preferences):
         if path not in ('theme', 'defaultProvider', 'defaultModel'):
             changes.append('Set pi ' + path + ' to ' + json.dumps(value) + '.')
+    for path, value in differences(guest.get('subagent_config', {}), SUBAGENT_CONFIG):
+        changes.append('Set pi-subagents config ' + path + ' to ' + json.dumps(value) + '.')
     probe = guest['desired_endpoint']
     if probe['status'] != 'ok':
         report['warnings'].append('Guest → desired endpoint model discovery: ' + probe['status'])

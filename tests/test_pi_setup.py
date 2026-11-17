@@ -34,6 +34,8 @@ class PiSetupTests(unittest.TestCase):
             metadata.write_text(json.dumps({'version': version}))
         payload = {'settings_path': str(path), 'settings_revision': hashlib.sha256(path.read_bytes()).hexdigest(),
                    'pi_path': '/fake/pi', 'upgrade_pi': True, 'install_timeout': 1,
+                   'subagent_config': doctor.SUBAGENT_CONFIG,
+                   'subagent_config_revision': hashlib.sha256(b'').hexdigest(),
                    'preferences': desired_preferences(doctor.BASELINE, 'litellm-namek', 'model', 'medium')}
         return path, payload
 
@@ -49,6 +51,8 @@ class PiSetupTests(unittest.TestCase):
             self.assertEqual(updated['compaction'], {'enabled': True, 'reserveTokens': 32768})
             self.assertEqual(updated['retry']['provider']['timeoutMs'], 900000)
             self.assertEqual(updated['defaultThinkingLevel'], 'medium')
+            self.assertEqual(updated['subagents']['defaultThinking'], 'medium')
+            self.assertIn('npm:pi-subagents@0.89.0', updated['packages'])
             self.assertEqual(updated['pi-effort']['modelEffort']['litellm-namek/model'], 'medium')
             self.assertTrue(updated['unrelated']['preserve'])
             self.assertEqual(updated['packages'][0]['extensions'], ['./src/index.ts'])
@@ -58,12 +62,63 @@ class PiSetupTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             self.assertNotIn('TEST-SECRET', json.dumps(result))
+            subagent_path = path.parent / 'extensions/subagent/config.json'
+            self.assertEqual(json.loads(subagent_path.read_text()), doctor.SUBAGENT_CONFIG)
+            self.assertEqual(stat.S_IMODE(subagent_path.stat().st_mode), 0o600)
             payload['settings_revision'] = hashlib.sha256(path.read_bytes()).hexdigest()
+            payload['subagent_config_revision'] = hashlib.sha256(subagent_path.read_bytes()).hexdigest()
             stable = path.read_bytes()
             with patch.object(guest_setup, 'execute', return_value='1.4.0\n') as command:
                 self.assertEqual(guest_setup.apply(payload)['status'], 'ok')
             self.assertEqual(path.read_bytes(), stable)
             self.assertEqual(command.call_count, 1)  # Version check only; no reinstall.
+
+    def test_subagent_config_merge_keeps_custom_fields_and_private_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            config = path.parent / 'extensions/subagent/config.json'
+            config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({'parallel': {'maxTasks': 2, 'concurrency': 4}, 'custom': {'preserve': True}}))
+            before = config.read_bytes()
+            payload['subagent_config_revision'] = hashlib.sha256(before).hexdigest()
+            with patch.object(guest_setup, 'execute', return_value='1.4.0\n'):
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'ok', result)
+            current = json.loads(config.read_text())
+            self.assertEqual(current['parallel'], {'maxTasks': 2, 'concurrency': 1})
+            self.assertEqual(current['maxSubagentDepth'], 1)
+            self.assertTrue(current['custom']['preserve'])
+            self.assertEqual(Path(result['subagent_config_backup']).read_bytes(), before)
+
+    def test_subagent_install_is_pinned_and_no_child_is_launched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            metadata = path.parent / 'npm/node_modules/pi-subagents/package.json'
+            metadata.unlink()
+            def execute(pi, arguments, timeout, environment):
+                if arguments == ['--version']:
+                    return '1.4.0\n'
+                self.assertEqual(arguments, ['install', 'npm:pi-subagents@0.89.0'])
+                metadata.write_text('{"version":"0.89.0"}')
+                return ''
+            with patch.object(guest_setup, 'execute', side_effect=execute) as command:
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'ok', result)
+            self.assertEqual(command.call_count, 2)
+
+    def test_subagent_config_changed_since_preflight_blocks_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, payload = self.fixture(Path(tmp))
+            config = path.parent / 'extensions/subagent/config.json'
+            config.parent.mkdir(parents=True)
+            config.write_text('{"concurrent":true}')
+            before = path.read_bytes()
+            with patch.object(guest_setup, 'execute') as command:
+                result = guest_setup.apply(payload)
+            self.assertEqual(result['status'], 'failed')
+            command.assert_not_called()
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(config.read_text(), '{"concurrent":true}')
 
     def test_settings_changed_after_preflight_are_not_overwritten(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -226,6 +281,7 @@ class PiSetupTests(unittest.TestCase):
         report = {
             'pi': {'pi_path': '/guest/pi', 'settings_path': '/guest/settings.json', 'settings_revision': 'revision',
                    'auth_revision': 'auth-revision', 'provider': 'litellm-namek',
+                   'subagent_config_revision': 'subagent-revision',
                    'desired_endpoint': {'status': 'ok', 'models': ['model']},
                    'baseUrl': 'http://0.0.0.0:14042', 'credential_matches': True},
             'connection': {'preview_safe': False, 'endpoint_preview_safe': True, 'provider_url': 'http://10.77.0.1:14042'},

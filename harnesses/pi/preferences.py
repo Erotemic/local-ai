@@ -1,7 +1,7 @@
 """Shared settings policy used by the host doctor and guest setup."""
 import copy
 
-PACKAGE_VERSIONS = {'pi-provider-litellm': '4.4.2', 'pi-effort': '0.1.1'}
+PACKAGE_VERSIONS = {'pi-provider-litellm': '4.4.2', 'pi-effort': '0.1.1', 'pi-subagents': '0.89.0'}
 MIN_PI_VERSION = (1, 4, 0)  # Recipe-tested baseline, not a claim about upstream minimums.
 
 
@@ -18,6 +18,7 @@ def desired_preferences(baseline, provider, model, effort=None):
             result['pi-effort'] = {'modelEffort': {key: level}}
     if effort:
         result['defaultThinkingLevel'] = effort
+    result.setdefault('subagents', {})['defaultThinking'] = result['defaultThinkingLevel']
     return result
 
 

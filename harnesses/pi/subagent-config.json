@@ -1,0 +1,14 @@
+{
+  "toolActivation": "eager",
+  "maxSubagentDepth": 1,
+  "parallel": {
+    "concurrency": 1
+  },
+  "globalConcurrencyLimit": 1,
+  "maxActiveAsyncRunsPerSession": 1,
+  "maxSubagentSpawnsPerRun": 4,
+  "maxSubagentSpawnsPerSession": 16,
+  "scheduledRuns": {
+    "enabled": false
+  }
+}
