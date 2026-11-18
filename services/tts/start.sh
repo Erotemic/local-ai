@@ -40,16 +40,17 @@ case "$backend" in
     ;;
 esac
 
-# Dual mode performs its own preflight before replacing any working services.
-if [[ "$backend" == breeze-tts2-dual ]]; then
-  if $keep_running; then exec "$SERVICE_DIR/start-breeze-dual.sh"; fi
-  exec "$SERVICE_DIR/start-breeze-dual.sh" --stop-other-backends
+# Breeze performs its own preflight before replacing any working services.
+if [[ "$backend" == breeze-tts2 || "$backend" == breeze-tts2-dual ]]; then
+  if $keep_running; then exec "$SERVICE_DIR/start-breeze.sh"; fi
+  exec "$SERVICE_DIR/start-breeze.sh" --stop-other-backends
 fi
 
 if ! $keep_running; then
+  python3 "$SERVICE_DIR/scripts/breeze_deploy.py" stop
   "$SERVICE_DIR/compose.sh" stop \
     qwentts-gateway qwentts kokoro-gpu kokoro-cpu \
-    indextts25 chatterbox-flash chatterbox-nano breeze-tts2 breeze-gateway breeze-worker-0 breeze-worker-1 fish-s2-pro >/dev/null 2>&1 || true
+    indextts25 chatterbox-flash chatterbox-nano breeze-tts2 fish-s2-pro >/dev/null 2>&1 || true
 fi
 
 echo "Starting active TTS backend: $backend"
@@ -61,5 +62,4 @@ case "$backend" in
   chatterbox-flash) exec "$SERVICE_DIR/start-chatterbox-flash.sh" ;;
   chatterbox-nano) exec "$SERVICE_DIR/start-chatterbox-nano.sh" ;;
   fish-s2-pro) exec "$SERVICE_DIR/start-candidate.sh" fish-s2-pro ;;
-  breeze-tts2) exec "$SERVICE_DIR/start-candidate.sh" breeze-tts2 ;;
 esac

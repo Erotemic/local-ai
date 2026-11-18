@@ -17,7 +17,7 @@ set -a
 source "$ROOT_DIR/.env"
 source "$SERVICE_DIR/.env"
 set +a
-export TTS_BREEZE_GPU="$gpu" TTS_BREEZE_FAST=1 TTS_BENCH_CANDIDATE_VOICE="$voice"
+export TTS_BREEZE_GPUS="$gpu" TTS_BREEZE_FAST=1 TTS_BENCH_CANDIDATE_VOICE="$voice"
 export TTS_BREEZE_START_TIMEOUT="${TTS_BREEZE_FAST_START_TIMEOUT:-1800}"
 data_root="${TTS_DATA_ROOT:-${LOCAL_AI_SERVICE_ROOT:-/data/services/local-ai}/tts}"
 output_root="${TTS_BENCH_OUTPUT_DIR:-$data_root/benchmarks}"
@@ -28,8 +28,9 @@ exec > >(tee "$session_dir/session.log") 2>&1
 echo "GPU=$gpu ($gpu_name) voice=$voice runs=$runs mode=fast-all"
 echo "artifacts=$session_dir"
 # Fish must release its memory before the graph warmup.
-"$SERVICE_DIR/compose.sh" stop breeze-tts2 fish-s2-pro
-cleanup() { "$SERVICE_DIR/compose.sh" stop breeze-tts2 || true; }
+python3 "$SERVICE_DIR/scripts/breeze_deploy.py" stop
+"$SERVICE_DIR/compose.sh" stop fish-s2-pro
+cleanup() { python3 "$SERVICE_DIR/scripts/breeze_deploy.py" stop || true; }
 trap cleanup EXIT
 start_epoch="$(python3 -c 'import time; print(time.monotonic())')"
 "$SERVICE_DIR/start-candidate.sh" breeze-tts2

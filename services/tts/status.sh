@@ -24,7 +24,7 @@ case "$backend" in
   chatterbox-flash) port="${TTS_CHATTERBOX_FLASH_PORT:-11439}"; container="ai-voice-chatterbox-flash" ;;
   chatterbox-nano) port="${TTS_CHATTERBOX_NANO_PORT:-11440}"; container="ai-voice-chatterbox-nano" ;;
   fish-s2-pro) port="${TTS_FISH_PORT:-11442}"; container="ai-voice-fish-s2-pro" ;;
-  breeze-tts2) port="${TTS_BREEZE_PORT:-11441}"; container="ai-voice-breeze-tts2" ;;
+  breeze-tts2|breeze-tts2-dual) exec python3 "$SERVICE_DIR/scripts/breeze_deploy.py" status ;;
   *) echo "ERROR: invalid TTS_ACTIVE_BACKEND=$backend" >&2; exit 2 ;;
 esac
 

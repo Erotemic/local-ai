@@ -48,11 +48,7 @@ case "$backend" in
     timeout_s="${TTS_CHATTERBOX_NANO_START_TIMEOUT:-600}"
     ;;
   breeze-tts2)
-    service="breeze-tts2"
-    bundle="breeze-tts2"
-    container="ai-voice-breeze-tts2"
-    port="${TTS_BREEZE_PORT:-11441}"
-    timeout_s="${TTS_BREEZE_START_TIMEOUT:-600}"
+    exec "$SERVICE_DIR/start-breeze.sh" "${@:2}"
     ;;
   fish-s2-pro)
     service="fish-s2-pro"
@@ -74,9 +70,6 @@ fi
 
 uv run "$ROOT_DIR/scripts/local_ai.py" model check "$bundle" --service-dir "$SERVICE_DIR"
 "$SERVICE_DIR/compose.sh" config --quiet
-if [[ "$backend" == breeze-tts2 ]]; then
-  "$SERVICE_DIR/compose.sh" stop breeze-gateway breeze-worker-0 breeze-worker-1
-fi
 "$SERVICE_DIR/compose.sh" up -d --no-build --pull never "$service"
 
 bind_address="${TTS_BIND_ADDRESS:-127.0.0.1}"

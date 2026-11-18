@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One Breeze endpoint for independent GPU replicas, including async job affinity.
 
-The SQLite routing table contains only opaque job IDs, worker indexes, states,
+The SQLite routing table contains only opaque job IDs, worker identities, states,
 and timestamps. Synthesis inputs, voice references, and audio are not persisted.
 A submitted inference is never silently replayed on another worker.
 """
@@ -27,12 +27,15 @@ DISCOVERY = {'/v1/models', '/v1/audio/voices', '/v1/voices'}
 
 
 class Gateway:
-    def __init__(self, workers, database, *, timeout=1800, probe_timeout=3):
+    def __init__(self, workers, database, *, timeout=1800, probe_timeout=3, gpu_ids=None, legacy_workers=None):
         self.workers = [url.rstrip('/') for url in workers]
         if not self.workers or len(set(self.workers)) != len(self.workers):
             raise ValueError('distinct Breeze worker URLs are required')
         if timeout <= 0 or probe_timeout <= 0:
             raise ValueError('gateway timeouts must be positive')
+        self.gpu_ids = list(gpu_ids) if gpu_ids is not None else list(range(len(workers)))
+        if len(self.gpu_ids) != len(workers):
+            raise ValueError('GPU IDs must correspond to the configured workers')
         self.timeout, self.probe_timeout = timeout, probe_timeout
         self.database = str(database)
         Path(database).parent.mkdir(parents=True, exist_ok=True)
@@ -43,7 +46,15 @@ class Gateway:
         with self.db() as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS routes '
                        '(id TEXT PRIMARY KEY, worker INTEGER NOT NULL, remote TEXT NOT NULL, '
-                       'state TEXT NOT NULL, updated REAL NOT NULL)')
+                       'state TEXT NOT NULL, updated REAL NOT NULL, endpoint TEXT)')
+            columns = {row[1] for row in db.execute('PRAGMA table_info(routes)')}
+            if 'endpoint' not in columns:
+                db.execute('ALTER TABLE routes ADD COLUMN endpoint TEXT')
+            # The former fixed two-worker recipe had these stable DNS names.
+            # Persist endpoint identities so reordering/removing GPUs can never
+            # send an existing job to a different worker.
+            for index, endpoint in enumerate(legacy_workers or ['http://breeze-worker-0:8080', 'http://breeze-worker-1:8080']):
+                db.execute('UPDATE routes SET endpoint=? WHERE worker=? AND endpoint IS NULL', (endpoint, index))
 
     def db(self):
         return closing(sqlite3.connect(self.database, timeout=10))
@@ -83,9 +94,13 @@ class Gateway:
             return
         try:
             with self.db() as db:
-                rows = db.execute("SELECT id, worker, remote FROM routes WHERE state NOT IN ('ready','error','cancelled','expired')").fetchall()
+                rows = db.execute("SELECT id, endpoint, remote FROM routes WHERE state NOT IN ('ready','error','cancelled','expired')").fetchall()
             def inspect(row):
-                public_id, worker, remote = row
+                public_id, endpoint, remote = row
+                if endpoint not in self.workers:
+                    self.record_state(public_id, 'expired')
+                    return
+                worker = self.workers.index(endpoint)
                 try:
                     status, _, payload = self.request(worker, 'GET', '/v1/audio/jobs/' + remote, probe=True)
                     if status == 404:
@@ -106,11 +121,11 @@ class Gateway:
         self.reconcile()
         with self.lock:
             with self.db() as db:
-                counts = dict(db.execute("SELECT worker, count(*) FROM routes WHERE state NOT IN ('ready','error','cancelled','expired') GROUP BY worker"))
+                counts = dict(db.execute("SELECT endpoint, count(*) FROM routes WHERE state NOT IN ('ready','error','cancelled','expired') GROUP BY endpoint"))
             available = [i for i in range(len(self.workers)) if ready.get(i)]
             if not available:
                 raise ConnectionError('No Breeze worker is ready')
-            worker = min(available, key=lambda i: (counts.get(i, 0) + self.inflight[i], (i - self.cursor) % len(self.workers)))
+            worker = min(available, key=lambda i: (counts.get(self.workers[i], 0) + self.inflight[i], (i - self.cursor) % len(self.workers)))
             self.inflight[worker] += 1
             self.cursor = (worker + 1) % len(self.workers)
             return worker
@@ -119,10 +134,14 @@ class Gateway:
         if method not in ('GET', 'DELETE') or (audio and method != 'GET'):
             return self.json_response(405, {'error': 'method not allowed'})
         with self.db() as db:
-            route = db.execute('SELECT worker, remote FROM routes WHERE id=?', (public_id,)).fetchone()
+            route = db.execute('SELECT endpoint, remote FROM routes WHERE id=?', (public_id,)).fetchone()
         if not route:
             return self.json_response(404, {'error': 'unknown or expired speech job'})
-        worker, remote = route
+        endpoint, remote = route
+        if endpoint not in self.workers:
+            self.record_state(public_id, 'expired')
+            return self.json_response(404, {'error': 'speech job worker is no longer configured'})
+        worker = self.workers.index(endpoint)
         status, headers, payload = self.request(worker, method, '/v1/audio/jobs/' + remote + ('/audio' if audio else ''))
         if status == 404:
             self.record_state(public_id, 'expired')
@@ -145,7 +164,7 @@ class Gateway:
         if path == '/health':
             return self.json_response(200 if any(ready.values()) else 503,
                 {'status': 'ok' if all(ready.values()) else 'degraded', 'backend': 'breeze-tts2',
-                 'workers': [{'index': index, 'ready': health} for index, health in ready.items()]})
+                 'workers': [{'index': index, 'gpu': self.gpu_ids[index], 'ready': health} for index, health in ready.items()]})
         if path == '/v1/runtime':
             workers, primary = [], None
             for index, health in ready.items():
@@ -159,10 +178,10 @@ class Gateway:
                                 primary = dict(info)
                     except (OSError, URLError, ValueError):
                         pass
-                workers.append({'index': index, 'ready': info is not None, 'runtime': info})
+                workers.append({'index': index, 'gpu': self.gpu_ids[index], 'ready': info is not None, 'runtime': info})
             if primary is None:
                 return self.json_response(503, {'error': 'No Breeze worker is ready'})
-            primary['gateway'] = {'strategy': 'least-outstanding', 'replicas': len(workers), 'workers': workers}
+            primary['gateway'] = {'strategy': 'least-outstanding', 'replicas': len(workers), 'gpus': self.gpu_ids, 'workers': workers}
             primary['long_form_jobs'] = {**primary.get('long_form_jobs', {}), 'workers': sum(w['ready'] for w in workers)}
             return self.json_response(200, primary)
         if not any(ready.values()):
@@ -178,8 +197,8 @@ class Gateway:
                 public_id = uuid4().hex  # Preserve the reader's 32-hex-ID contract.
                 with self.db() as db, db:
                     db.execute('DELETE FROM routes WHERE updated < ?', (time.time() - 86400,))
-                    db.execute('INSERT INTO routes VALUES (?,?,?,?,?)',
-                        (public_id, worker, remote, value.get('state', 'queued'), time.time()))
+                    db.execute('INSERT INTO routes (id,worker,remote,state,updated,endpoint) VALUES (?,?,?,?,?,?)',
+                        (public_id, worker, remote, value.get('state', 'queued'), time.time(), self.workers[worker]))
                 value['id'] = public_id
                 payload = json.dumps(value).encode()
             headers['X-Local-AI-Worker'] = str(worker)
@@ -231,9 +250,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    workers = [value.strip() for value in os.environ.get('BREEZE_WORKERS', 'http://breeze-worker-0:8080,http://breeze-worker-1:8080').split(',') if value.strip()]
+    workers = [value.strip() for value in os.environ.get('BREEZE_WORKERS', '').split(',') if value.strip()]
+    gpu_ids = os.environ.get('BREEZE_GPU_IDS')
     gateway = Gateway(workers, os.environ.get('BREEZE_GATEWAY_DB', '/state/routes.sqlite3'),
-                      timeout=float(os.environ.get('BREEZE_GATEWAY_TIMEOUT', '1800')))
+                      timeout=float(os.environ.get('BREEZE_GATEWAY_TIMEOUT', '1800')),
+                      gpu_ids=gpu_ids.split(',') if gpu_ids else None)
     server = ThreadingHTTPServer((os.environ.get('BREEZE_GATEWAY_HOST', '127.0.0.1'),
                                   int(os.environ.get('BREEZE_GATEWAY_PORT', '8080'))), Handler)
     server.gateway = gateway

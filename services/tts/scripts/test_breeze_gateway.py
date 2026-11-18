@@ -1,4 +1,4 @@
-"""CPU-only HTTP integration tests for the two-GPU gateway contract."""
+"""CPU-only HTTP integration tests for the N-GPU gateway contract."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -84,12 +84,14 @@ class Worker(BaseHTTPRequestHandler):
 
 
 class GatewayTests(unittest.TestCase):
+    worker_count = 2
+
     def setUp(self):
         self.cleanup = ExitStack()
         self.addCleanup(self.cleanup.close)
         folder = self.cleanup.enter_context(tempfile.TemporaryDirectory())
         self.workers = []
-        for index in range(2):
+        for index in range(self.worker_count):
             server = ThreadingHTTPServer(('127.0.0.1', 0), Worker)
             server.index, server.jobs, server.calls, server.ready, server.barrier = index, {}, 0, True, None
             self.serve(server)
@@ -98,6 +100,7 @@ class GatewayTests(unittest.TestCase):
         self.db = Path(folder)/'routes.sqlite3'
         self.gateway = Gateway(self.urls, self.db, timeout=4, probe_timeout=.5)
         server = ThreadingHTTPServer(('127.0.0.1',0), Handler)
+        self.http = server
         server.gateway = self.gateway
         self.serve(server)
         self.base = f'http://127.0.0.1:{server.server_port}'
@@ -157,6 +160,31 @@ class GatewayTests(unittest.TestCase):
         self.assertNotIn(b'Synthetic test text',self.db.read_bytes())
         self.assertNotIn(b'foobar',self.db.read_bytes())
 
+    def test_jobs_keep_their_worker_when_gpu_list_is_reordered(self):
+        public, index = self.submit()
+        restored = Gateway(list(reversed(self.urls)), self.db, timeout=4, probe_timeout=.5)
+        status, _, payload = restored.handle('GET', '/v1/audio/jobs/' + public['id'])
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload)['id'], public['id'])
+        self.assertEqual(len(self.workers[index].jobs), 1)
+        removed = Gateway([self.urls[1-index]], self.db, timeout=4, probe_timeout=.5)
+        self.assertEqual(removed.handle('GET', '/v1/audio/jobs/' + public['id'])[0], 404)
+        self.assertEqual(len(self.workers[1-index].jobs), 0)
+
+    def test_legacy_routing_table_migrates_without_changing_affinity(self):
+        remote = uuid4().hex
+        public = uuid4().hex
+        self.workers[0].jobs[remote] = {'id': remote, 'state': 'queued'}
+        legacy = self.db.with_name('legacy.sqlite3')
+        with sqlite3.connect(legacy) as db:
+            db.execute('CREATE TABLE routes (id TEXT PRIMARY KEY, worker INTEGER NOT NULL, '
+                       'remote TEXT NOT NULL, state TEXT NOT NULL, updated REAL NOT NULL)')
+            db.execute('INSERT INTO routes VALUES (?,0,?,?,?)', (public, remote, 'queued', time.time()))
+        restored = Gateway(list(reversed(self.urls)), legacy, legacy_workers=self.urls)
+        status, _, payload = restored.handle('GET', '/v1/audio/jobs/' + public)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(payload)['id'], public)
+
     def test_completed_unpolled_jobs_do_not_keep_worker_busy(self):
         first,index=self.submit()
         second,other=self.submit()
@@ -196,6 +224,23 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(call(self.base,'GET',path)[0],200)
         for path in ('/v1/audio/jobs/not-an-id','/v1/audio/jobs/'+'0'*32+'/extra','/v1/audio/jobs/'+'0'*32):
             self.assertEqual(call(self.base,'GET',path)[0],404)
+
+
+class FourWorkerTests(unittest.TestCase):
+    worker_count = 4
+    setUp = GatewayTests.setUp
+    serve = GatewayTests.serve
+
+    # The two-worker cases above exercise degraded routing and affinity in detail.
+    # This independent case checks simultaneous requests really reach all N workers.
+    def test_four_concurrent_requests(self):
+        barrier = threading.Barrier(4)
+        for worker in self.workers:
+            worker.barrier = barrier
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(lambda _: call(self.base, 'POST', '/v1/audio/speech', {'input':'test'}), range(4)))
+        self.assertEqual([worker.calls for worker in self.workers], [1, 1, 1, 1])
+        self.assertEqual({result[2] for result in results}, {f'audio-{i}'.encode() for i in range(4)})
 
 
 if __name__ == '__main__':

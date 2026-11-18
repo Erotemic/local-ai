@@ -15,14 +15,15 @@ Opt-in candidates: **IndexTTS 2.5**, **Chatterbox Flash**, and **Chatterbox Nano
 There is intentionally no Wavhost layer. `local-ai` owns deployment and backend
 selection directly.
 
-## Two-GPU Breeze
+## Breeze GPU selection
 
 Use `./breeze.sh setup` then `./breeze.sh start` from the `local-ai` root.
-This provisions the existing Breeze bundle and starts two independent replicas
-behind the existing public Breeze port. See the
-[dual-GPU guide](docs/breeze-dual-gpu.md) for configuration and operation.
+Set `TTS_BREEZE_GPUS` in `services/tts/.env`: `0` selects one GPU, `0,1`
+selects two, and `0,1,2,3` selects four. The same start command serves one replica
+per listed GPU behind the existing public Breeze port. See the
+[GPU configuration guide](docs/breeze-dual-gpu.md) for configuration and operation.
 Normal `./setup.sh` and `./start.sh` also support
-`TTS_ACTIVE_BACKEND=breeze-tts2-dual` from this directory.
+`TTS_ACTIVE_BACKEND=breeze-tts2` from this directory.
 
 ## Long-form lecture quality experiments
 

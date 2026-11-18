@@ -69,8 +69,8 @@ case "$backend" in
     model="${TTS_BREEZE_MODEL_ALIAS:-breeze-tts2}"
     voice="${TTS_BENCH_CANDIDATE_VOICE:-ryan}"
     dtype="${TTS_BREEZE_DTYPE:-bfloat16}"
-    gpu="${TTS_BREEZE_GPU:-1}"
-    runtime_container="ai-voice-breeze-tts2"
+    gpu="${TTS_BREEZE_GPUS:?configure TTS_BREEZE_GPUS first}"
+    runtime_container="ai-voice-breeze-worker-${gpu%%,*}"
     runtime_image="local/tts-breeze-tts2:candidate"
     ;;
   fish-s2-pro)

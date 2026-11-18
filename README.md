@@ -28,7 +28,7 @@ Kokoro-FastAPI GPU and CPU images provide simple alternative backends. The
 qwentts client gateway is a small local Python + ffmpeg image used only for MP3
 transport, plausibility checks, and retries.
 
-## Breeze TTS on two GPUs
+## Breeze TTS on 1, 2, or N GPUs
 
 From this repository's root:
 
@@ -38,9 +38,9 @@ From this repository's root:
 ./breeze.sh status
 ```
 
-The [dual-GPU Breeze guide](services/tts/docs/breeze-dual-gpu.md) covers GPU
-selection, optional fast inference, logs, and switching back to one GPU. Two
-independent replicas serve concurrent work behind your existing Breeze endpoint;
+The [Breeze GPU guide](services/tts/docs/breeze-dual-gpu.md) covers GPU
+selection through `TTS_BREEZE_GPUS=0`, `0,1`, or an explicit N-GPU list,
+optional fast inference, and operation. Independent replicas serve concurrent work behind your existing Breeze endpoint;
 clients retain their current URL, model, and voice configuration.
 
 ## Normal workflow

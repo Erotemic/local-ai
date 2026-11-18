@@ -6,6 +6,7 @@ gpu="${2:-}"
 
 if ! [[ "$runs" =~ ^[1-9][0-9]*$ ]]; then echo "usage: $0 [runs] [physical-gpu-index]" >&2; exit 2; fi
 if [[ -n "$gpu" ]]; then
+  export TTS_BREEZE_GPUS="$gpu"
   export TTS_INDEXTTS25_GPU="$gpu"
   export TTS_CHATTERBOX_FLASH_GPU="$gpu"
   export TTS_CHATTERBOX_NANO_GPU="$gpu"
@@ -24,7 +25,8 @@ PY2
   echo "startup_seconds=$startup_seconds"
   TTS_BENCH_STARTUP_SECONDS="$startup_seconds" \
     "$SERVICE_DIR/scripts/benchmark.sh" "$backend" "$runs"
-  "$SERVICE_DIR/compose.sh" stop "$backend" >/dev/null
+  if [[ "$backend" == breeze-tts2 ]]; then python3 "$SERVICE_DIR/scripts/breeze_deploy.py" stop;
+  else "$SERVICE_DIR/compose.sh" stop "$backend" >/dev/null; fi
   echo
 done
 

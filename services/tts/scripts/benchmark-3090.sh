@@ -25,7 +25,7 @@ set -a
 source "$ROOT_DIR/.env"
 source "$SERVICE_DIR/.env"
 set +a
-export TTS_BREEZE_GPU="$gpu" TTS_FISH_GPU="$gpu" TTS_BENCH_CANDIDATE_VOICE="$voice"
+export TTS_BREEZE_GPUS="$gpu" TTS_FISH_GPU="$gpu" TTS_BENCH_CANDIDATE_VOICE="$voice"
 data_root="${TTS_DATA_ROOT:-${LOCAL_AI_SERVICE_ROOT:-/data/services/local-ai}/tts}"
 output_root="${TTS_BENCH_OUTPUT_DIR:-$data_root/benchmarks}"
 mkdir -p "$output_root"
@@ -35,10 +35,12 @@ exec > >(tee "$session_dir/session.log") 2>&1
 echo "GPU=$gpu ($gpu_name) voice=$voice runs=$runs"
 echo "artifacts=$session_dir"
 # Release either candidate before starting so both do not occupy the GPU.
-"$SERVICE_DIR/compose.sh" stop breeze-tts2 fish-s2-pro
+python3 "$SERVICE_DIR/scripts/breeze_deploy.py" stop
+"$SERVICE_DIR/compose.sh" stop fish-s2-pro
 active=""
 cleanup() {
-  if [[ -n "$active" ]]; then "$SERVICE_DIR/compose.sh" stop "$active" || true; fi
+  if [[ "$active" == breeze-tts2 ]]; then python3 "$SERVICE_DIR/scripts/breeze_deploy.py" stop || true;
+  elif [[ -n "$active" ]]; then "$SERVICE_DIR/compose.sh" stop "$active" || true; fi
 }
 trap cleanup EXIT
 for backend in breeze-tts2 fish-s2-pro; do
@@ -52,7 +54,8 @@ print(f'{time.monotonic() - float(sys.argv[1]):.3f}')
 PY
 )"
   TTS_BENCH_STARTUP_SECONDS="$startup_seconds" "$SERVICE_DIR/scripts/benchmark.sh" "$backend" "$runs"
-  "$SERVICE_DIR/compose.sh" stop "$backend"
+  if [[ "$backend" == breeze-tts2 ]]; then python3 "$SERVICE_DIR/scripts/breeze_deploy.py" stop;
+  else "$SERVICE_DIR/compose.sh" stop "$backend"; fi
   active=""
 done
 echo "Benchmark complete: $session_dir"

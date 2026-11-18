@@ -4,6 +4,8 @@ SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SERVICE_DIR/../.." && pwd)"
 SERVICE_ENV="$SERVICE_DIR/.env"
 inherited_backend="${TTS_ACTIVE_BACKEND-}"
+python3 "$SERVICE_DIR/scripts/breeze_deploy.py" migrate
+if [[ "$inherited_backend" == breeze-tts2-dual ]]; then inherited_backend=breeze-tts2; fi
 
 # Schema v7 adds generic model bundles and candidate TTS experiments. Migrate
 # the old qwentts-only bundle key before the generic config refresher runs.
@@ -44,10 +46,10 @@ if [[ -f "$SERVICE_ENV" ]]; then
 fi
 
 # The generic helper deliberately treats declared .env settings as authoritative.
-# Select Breeze explicitly for a one-shot dual-mode setup even if the saved
+# Select Breeze explicitly for a one-shot Breeze setup even if the saved
 # default backend is still qwentts; no config file is silently rewritten.
 extra_setup_args=()
-if [[ "$inherited_backend" == breeze-tts2-dual ]]; then
+if [[ "$inherited_backend" == breeze-tts2 ]]; then
   extra_setup_args+=(--with-model breeze-tts2)
 fi
 uv run "$ROOT_DIR/scripts/local_ai.py" setup --service-dir "$SERVICE_DIR" "${extra_setup_args[@]}" "$@"
@@ -80,14 +82,14 @@ case "${TTS_ACTIVE_BACKEND:-qwentts}" in
   kokoro-cpu)
     "$SERVICE_DIR/compose.sh" pull kokoro-cpu
     ;;
-  breeze-tts2-dual)
+  breeze-tts2)
     # The normal model selection already provisions/builds the shared Breeze
-    # image. Only dual mode needs the small job-affinity gateway image.
+    # image. Every GPU count uses the same job-affinity gateway image.
     skip_gateway_build=false
     for arg in "$@"; do [[ "$arg" != --no-build ]] || skip_gateway_build=true; done
-    if ! $skip_gateway_build; then "$SERVICE_DIR/compose.sh" build breeze-gateway; fi
+    if ! $skip_gateway_build; then python3 "$SERVICE_DIR/scripts/breeze_deploy.py" build; fi
     ;;
-  indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2|fish-s2-pro)
+  indextts25|chatterbox-flash|chatterbox-nano|fish-s2-pro)
     # Candidate images are local builds selected by their model bundle. Their
     # weights were provisioned above; no registry pull is needed here.
     ;;
