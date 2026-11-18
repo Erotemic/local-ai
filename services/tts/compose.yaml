@@ -253,7 +253,7 @@ services:
               device_ids: ["${TTS_CHATTERBOX_NANO_GPU:-1}"]
               capabilities: ["gpu"]
 
-  breeze-tts2:
+  breeze-tts2: &breeze-service
     build:
       context: ../..
       dockerfile: services/tts/Dockerfile.breeze
@@ -332,3 +332,71 @@ services:
             - driver: nvidia
               device_ids: ["${TTS_FISH_GPU:-1}"]
               capabilities: [gpu]
+
+  # Independent model replicas. Private Compose-network endpoints only.
+  breeze-worker-0:
+    <<: *breeze-service
+    profiles: [breeze-dual]
+    container_name: ai-voice-breeze-worker-0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: ${TTS_BREEZE_DUAL_START_TIMEOUT:-1800}s
+    ports: []
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_BREEZE_DUAL_GPU_0:-0}"]
+              capabilities: [gpu]
+
+  breeze-worker-1:
+    <<: *breeze-service
+    profiles: [breeze-dual]
+    container_name: ai-voice-breeze-worker-1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: ${TTS_BREEZE_DUAL_START_TIMEOUT:-1800}s
+    ports: []
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_BREEZE_DUAL_GPU_1:-1}"]
+              capabilities: [gpu]
+
+  breeze-gateway:
+    profiles: [breeze-dual]
+    build:
+      context: ../..
+      dockerfile: services/tts/Dockerfile.breeze-gateway
+    image: local/tts-breeze-gateway:py313
+    container_name: ai-voice-breeze-gateway
+    restart: unless-stopped
+    depends_on:
+      breeze-worker-0:
+        condition: service_healthy
+      breeze-worker-1:
+        condition: service_healthy
+    ports:
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_BREEZE_PORT:-11441}:8080"
+    environment:
+      BREEZE_GATEWAY_HOST: 0.0.0.0
+      BREEZE_WORKERS: http://breeze-worker-0:8080,http://breeze-worker-1:8080
+      BREEZE_GATEWAY_DB: /state/routes.sqlite3
+      BREEZE_GATEWAY_TIMEOUT: ${TTS_BREEZE_GATEWAY_TIMEOUT:-1800}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${TTS_DATA_ROOT:?run ./setup.sh and use ./compose.sh}/breeze-gateway:/state:rw
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=10).read()"]
+      interval: 30s
+      timeout: 12s
+      retries: 3

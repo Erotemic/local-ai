@@ -15,6 +15,15 @@ Opt-in candidates: **IndexTTS 2.5**, **Chatterbox Flash**, and **Chatterbox Nano
 There is intentionally no Wavhost layer. `local-ai` owns deployment and backend
 selection directly.
 
+## Two-GPU Breeze
+
+Use `./breeze.sh setup` then `./breeze.sh start` from the `local-ai` root.
+This provisions the existing Breeze bundle and starts two independent replicas
+behind the existing public Breeze port. See the
+[dual-GPU guide](docs/breeze-dual-gpu.md) for configuration and operation.
+Normal `./setup.sh` and `./start.sh` also support
+`TTS_ACTIVE_BACKEND=breeze-tts2-dual` from this directory.
+
 ## Long-form lecture quality experiments
 
 For opt-in Breeze long-form benchmarks, reference-pair diagnostics, and offline

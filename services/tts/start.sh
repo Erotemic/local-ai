@@ -33,17 +33,23 @@ for key in "${!inherited_overrides[@]}"; do export "$key=${inherited_overrides[$
 
 backend="${TTS_ACTIVE_BACKEND:-qwentts}"
 case "$backend" in
-  qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2|fish-s2-pro) ;;
+  qwentts|kokoro-gpu|kokoro-cpu|indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2|breeze-tts2-dual|fish-s2-pro) ;;
   *)
     echo "ERROR: unsupported TTS_ACTIVE_BACKEND=$backend" >&2
     exit 2
     ;;
 esac
 
+# Dual mode performs its own preflight before replacing any working services.
+if [[ "$backend" == breeze-tts2-dual ]]; then
+  if $keep_running; then exec "$SERVICE_DIR/start-breeze-dual.sh"; fi
+  exec "$SERVICE_DIR/start-breeze-dual.sh" --stop-other-backends
+fi
+
 if ! $keep_running; then
   "$SERVICE_DIR/compose.sh" stop \
     qwentts-gateway qwentts kokoro-gpu kokoro-cpu \
-    indextts25 chatterbox-flash chatterbox-nano breeze-tts2 fish-s2-pro >/dev/null 2>&1 || true
+    indextts25 chatterbox-flash chatterbox-nano breeze-tts2 breeze-gateway breeze-worker-0 breeze-worker-1 fish-s2-pro >/dev/null 2>&1 || true
 fi
 
 echo "Starting active TTS backend: $backend"

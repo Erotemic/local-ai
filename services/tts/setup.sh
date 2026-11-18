@@ -43,7 +43,14 @@ if [[ -f "$SERVICE_ENV" ]]; then
   mv "$tmp" "$SERVICE_ENV"
 fi
 
-uv run "$ROOT_DIR/scripts/local_ai.py" setup --service-dir "$SERVICE_DIR" "$@"
+# The generic helper deliberately treats declared .env settings as authoritative.
+# Select Breeze explicitly for a one-shot dual-mode setup even if the saved
+# default backend is still qwentts; no config file is silently rewritten.
+extra_setup_args=()
+if [[ "$inherited_backend" == breeze-tts2-dual ]]; then
+  extra_setup_args+=(--with-model breeze-tts2)
+fi
+uv run "$ROOT_DIR/scripts/local_ai.py" setup --service-dir "$SERVICE_DIR" "${extra_setup_args[@]}" "$@"
 
 for arg in "$@"; do
   if [[ "$arg" == "--plan" ]]; then
@@ -72,6 +79,13 @@ case "${TTS_ACTIVE_BACKEND:-qwentts}" in
     ;;
   kokoro-cpu)
     "$SERVICE_DIR/compose.sh" pull kokoro-cpu
+    ;;
+  breeze-tts2-dual)
+    # The normal model selection already provisions/builds the shared Breeze
+    # image. Only dual mode needs the small job-affinity gateway image.
+    skip_gateway_build=false
+    for arg in "$@"; do [[ "$arg" != --no-build ]] || skip_gateway_build=true; done
+    if ! $skip_gateway_build; then "$SERVICE_DIR/compose.sh" build breeze-gateway; fi
     ;;
   indextts25|chatterbox-flash|chatterbox-nano|breeze-tts2|fish-s2-pro)
     # Candidate images are local builds selected by their model bundle. Their

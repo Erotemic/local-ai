@@ -74,6 +74,9 @@ fi
 
 uv run "$ROOT_DIR/scripts/local_ai.py" model check "$bundle" --service-dir "$SERVICE_DIR"
 "$SERVICE_DIR/compose.sh" config --quiet
+if [[ "$backend" == breeze-tts2 ]]; then
+  "$SERVICE_DIR/compose.sh" stop breeze-gateway breeze-worker-0 breeze-worker-1
+fi
 "$SERVICE_DIR/compose.sh" up -d --no-build --pull never "$service"
 
 bind_address="${TTS_BIND_ADDRESS:-127.0.0.1}"

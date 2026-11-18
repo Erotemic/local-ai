@@ -74,6 +74,12 @@ required = [
   "TTS_BREEZE_PORT",
   "TTS_BREEZE_GPU",
   "TTS_BREEZE_MODEL_ALIAS",
+  "TTS_BREEZE_SOURCE_REVISION",
+  "TTS_BREEZE_MODEL_REVISION",
+  "TTS_BREEZE_DUAL_GPU_0",
+  "TTS_BREEZE_DUAL_GPU_1",
+  "TTS_BREEZE_DUAL_START_TIMEOUT",
+  "TTS_BREEZE_GATEWAY_TIMEOUT",
   "TTS_FISH_PORT",
   "TTS_FISH_GPU",
   "TTS_FISH_START_TIMEOUT",
@@ -85,7 +91,7 @@ TTS_DATA_ROOT = "{LOCAL_AI_SERVICE_ROOT}/tts"
 [model_selection]
 env = "TTS_MODEL_BUNDLES"
 backend_env = "TTS_ACTIVE_BACKEND"
-backend_bundles = { qwentts = "qwen-0.6-customvoice-q8-gguf", indextts25 = "indextts-2.5", chatterbox-flash = "chatterbox-flash", chatterbox-nano = "chatterbox-nano", breeze-tts2 = "breeze-tts2", fish-s2-pro = "fish-s2-pro" }
+backend_bundles = { qwentts = "qwen-0.6-customvoice-q8-gguf", indextts25 = "indextts-2.5", chatterbox-flash = "chatterbox-flash", chatterbox-nano = "chatterbox-nano", breeze-tts2 = "breeze-tts2", breeze-tts2-dual = "breeze-tts2", fish-s2-pro = "fish-s2-pro" }
 
 [[directories]]
 label = "TTS service state"
@@ -98,6 +104,12 @@ label = "TTS benchmark artifacts"
 path = "{TTS_DATA_ROOT}/benchmarks"
 role = "Retained TTS benchmark audio, requests, metadata, and timing results"
 retention = "experimental outputs; user-managed"
+
+[[directories]]
+label = "Breeze dual-GPU job routing"
+path = "{TTS_DATA_ROOT}/breeze-gateway"
+role = "Opaque job affinity records; no speech input, reference audio, or output audio"
+retention = "Gateway job routes expire after one day; worker results remain temporary"
 
 [[models]]
 name = "qwen-0.6-customvoice-q8-gguf"

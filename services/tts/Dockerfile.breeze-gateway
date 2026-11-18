@@ -1,0 +1,4 @@
+FROM python:3.13-slim
+WORKDIR /opt/local-ai
+COPY services/tts/scripts/breeze_gateway.py /opt/local-ai/breeze_gateway.py
+CMD ["python", "/opt/local-ai/breeze_gateway.py"]
