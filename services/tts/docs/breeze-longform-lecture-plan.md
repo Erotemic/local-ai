@@ -80,7 +80,7 @@ Build a focused addition to the existing benchmark workflow, e.g. `services/tts/
 | Dimension | Proposed trials |
 | --- | --- |
 | Passage length | Current 12-word baseline; complete sentences around 25–45 words; longer complete paragraphs sized within measured generation limits. Use character limits too, but let sentence boundaries drive splits. |
-| Instruction / CFG | Plain cloning with no performance instruction and CFG **1.0**; current Sagan instruction and CFG **2.0**; a concise mathematical-lecturer direction. |
+| Instruction / CFG | Plain cloning with no performance instruction and CFG **1.0**; configured lecture-narration instruction and CFG **2.0**; a concise mathematical-lecturer direction. |
 | Reference | Existing raw `foobar-v1`; clean complete-sentence selected sample; selected + normalized variant, each with exact matching transcript. |
 | Inference | Eager versus fast CUDA-graph mode on the same hardware, reference and text. Record exact runtime pins and warmup state. |
 | Randomness | Fixed seed for reproducibility and a small set of alternate seeds to quantify between-segment variability. Fixed seed alone is not evidence of continuous voice identity. |
@@ -181,7 +181,7 @@ These are research references to inspect while implementing; the pinned local Py
 
 | Phase | State | Evidence / next action |
 | --- | --- | --- |
-| 0 Baseline | Not started | Retain a verified multi-segment G2 sample and actual Sagan request profile. |
+| 0 Baseline | Not started | Retain a verified multi-segment G2 sample and actual reference-conditioned narration request settings (without private speaker names or assets). |
 | 1 References/diagnostics | Not started | Inventory upstream metadata/conditioning and reference processing. |
 | 2 Quality comparison | Not started | Run the paired short/medium/paragraph, CFG and reference experiments. |
 | 3 Segment validation | Not started | Implement detection only after establishing supported signals. |
